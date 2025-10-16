@@ -5,8 +5,8 @@ import { SearchBar } from '@/components/search-bar'
 import { Button } from '@/components/ui/button'
 import { StoreProvider, useStore } from '@/lib/store-context'
 import { observer } from 'mobx-react-lite'
-import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 
 export function Home() {
   return (
