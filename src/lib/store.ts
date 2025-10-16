@@ -927,12 +927,21 @@ export const RootStore = types
           persistedBullets = createWelcomeTree()
         }
 
+        const previousZoomedId = self.zoomedBulletId
+
         runWithoutRecording(() => {
-          self.bullets.clear()
-          persistedBullets.forEach(node => self.bullets.push(Bullet.create(toSnapshot(node))))
+          self.zoomedBulletId = null
+          const newBullets = persistedBullets.map(node => Bullet.create(toSnapshot(node)))
+          self.bullets.replace(newBullets)
         })
 
-        self.zoomedBulletId = null
+        if (previousZoomedId) {
+          const restored = self.findBulletById(previousZoomedId)
+          if (restored) {
+            self.zoomedBulletId = previousZoomedId
+          }
+        }
+
         self.history.clear()
         self.historyIndex = -1
         storeWithActions.saveToHistory()
@@ -956,11 +965,10 @@ export const RootStore = types
           const normalized = data.bullets.map(normalizePersistedBullet) as PersistedBullet[]
 
           runWithoutRecording(() => {
-            self.bullets.clear()
-            normalized.forEach(node => self.bullets.push(Bullet.create(toSnapshot(node))))
+            self.zoomedBulletId = null
+            const newBullets = normalized.map(node => Bullet.create(toSnapshot(node)))
+            self.bullets.replace(newBullets)
           })
-
-          self.zoomedBulletId = null
           self.history.clear()
           self.historyIndex = -1
           storeWithActions.saveToHistory()
@@ -981,11 +989,11 @@ export const RootStore = types
         const welcomeTree = createWelcomeTree()
 
         runWithoutRecording(() => {
-          self.bullets.clear()
-          welcomeTree.forEach(node => self.bullets.push(Bullet.create(toSnapshot(node))))
+          self.zoomedBulletId = null
+          const newBullets = welcomeTree.map(node => Bullet.create(toSnapshot(node)))
+          self.bullets.replace(newBullets)
         })
 
-        self.zoomedBulletId = null
         self.history.clear()
         self.historyIndex = -1
         storeWithActions.saveToHistory()
