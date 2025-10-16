@@ -28,7 +28,7 @@ export function StoreProvider({
     }
 
     if (store.bullets.length === 0) {
-      store.loadFromLocalStorage()
+      void store.loadFromEventStore()
     }
 
     hasLoadedRef.current = true
@@ -44,17 +44,6 @@ export function StoreProvider({
       store.setZoomedBulletId(initialZoomedBulletId)
     }
   }, [initialZoomedBulletId])
-
-  useEffect(() => {
-    const store = storeRef.current
-    if (!store) return
-
-    const interval = setInterval(() => {
-      store.saveToLocalStorage()
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [])
 
   return <StoreContext.Provider value={storeRef.current}>{children}</StoreContext.Provider>
 }

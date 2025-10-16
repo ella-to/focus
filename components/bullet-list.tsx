@@ -42,8 +42,7 @@ export const BulletList = observer(() => {
     if (store.zoomedBullet && zoomedContextRef.current) {
       const newContext = zoomedContextRef.current.textContent || ''
       if (newContext !== store.zoomedBullet.context) {
-        store.zoomedBullet.setContext(newContext)
-        store.saveToLocalStorage()
+        store.updateBulletContext(store.zoomedBullet.id, newContext)
       }
     }
   }, [store])

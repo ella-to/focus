@@ -1,5 +1,159 @@
-import { detach, getSnapshot, types, type Instance } from 'mobx-state-tree'
+import { detach, flow, getSnapshot, types, type Instance } from 'mobx-state-tree'
 import { nanoid } from 'nanoid'
+import {
+  appendEvent,
+  bulkInsertEvents,
+  clearEvents,
+  getAllEvents,
+  isEventStoreAvailable,
+  type EventRecord,
+  type EventPayloadMap,
+  type EventType,
+  type ParentId,
+} from './event-store'
+import { replayEvents, type PersistedBullet } from './event-replayer'
+
+let recordingDepth = 0
+let lastTimestamp = 0
+
+function nextTimestamp(): number {
+  const now = Date.now()
+  if (now <= lastTimestamp) {
+    lastTimestamp += 1
+  } else {
+    lastTimestamp = now
+  }
+  return lastTimestamp
+}
+
+function runWithoutRecording<T>(fn: () => T): T {
+  recordingDepth++
+  try {
+    return fn()
+  } finally {
+    recordingDepth--
+  }
+}
+
+async function runWithoutRecordingAsync<T>(fn: () => Promise<T>): Promise<T> {
+  recordingDepth++
+  try {
+    return await fn()
+  } finally {
+    recordingDepth--
+  }
+}
+
+function emitEvent<K extends EventType>(type: K, payload: EventPayloadMap[K]) {
+  if (recordingDepth > 0 || !isEventStoreAvailable()) {
+    return
+  }
+
+  const timestamp = nextTimestamp()
+  void appendEvent({ type, payload, timestamp }).catch(error => {
+    console.error(`[event-store] Failed to append event "${type}"`, error)
+  })
+}
+
+function toSnapshot(node: PersistedBullet): any {
+  return {
+    id: node.id,
+    content: node.content,
+    context: node.context,
+    collapsed: node.collapsed,
+    createdAt: node.createdAt,
+    children: node.children.map(child => toSnapshot(child)),
+  }
+}
+
+function normalizePersistedBullet(bullet: any): PersistedBullet {
+  return {
+    id: bullet.id,
+    content: bullet.content ?? '',
+    context: bullet.context ?? '',
+    collapsed: Boolean(bullet.collapsed),
+    createdAt: typeof bullet.createdAt === 'number' ? bullet.createdAt : Date.now(),
+    children: Array.isArray(bullet.children) ? bullet.children.map(normalizePersistedBullet) : [],
+  }
+}
+
+function createPersistedBullet({
+  content,
+  context = '',
+  collapsed = false,
+  children = [],
+}: {
+  content: string
+  context?: string
+  collapsed?: boolean
+  children?: PersistedBullet[]
+}): PersistedBullet {
+  return {
+    id: nanoid(),
+    content,
+    context,
+    collapsed,
+    createdAt: Date.now(),
+    children,
+  }
+}
+
+function createWelcomeTree(): PersistedBullet[] {
+  const welcome = createPersistedBullet({
+    content: 'Welcome to Focus!',
+    context: 'Press Shift+Enter to add notes. Click the bullet dot to zoom in.',
+  })
+  const child1 = createPersistedBullet({
+    content: 'Press Enter to create a new bullet',
+  })
+  const child2 = createPersistedBullet({
+    content: 'Press Tab to indent',
+  })
+  const child3 = createPersistedBullet({
+    content: 'Press Shift+Tab to outdent',
+  })
+
+  welcome.children.push(child1, child2, child3)
+  return [welcome]
+}
+
+function createCreationEvents(nodes: PersistedBullet[], parentId: ParentId): Array<Omit<EventRecord, 'id'>> {
+  const events: Array<Omit<EventRecord, 'id'>> = []
+  nodes.forEach((node, index) => {
+    events.push({
+      type: 'bullet_created',
+      payload: {
+        id: node.id,
+        parentId,
+        index,
+        content: node.content,
+        context: node.context,
+        collapsed: node.collapsed,
+        createdAt: node.createdAt,
+      },
+      timestamp: nextTimestamp(),
+    })
+
+    if (node.children.length > 0) {
+      events.push(...createCreationEvents(node.children, node.id))
+    }
+  })
+  return events
+}
+
+async function replaceEventStoreWithTree(nodes: PersistedBullet[]) {
+  if (!isEventStoreAvailable()) {
+    return
+  }
+
+  const events = createCreationEvents(nodes, null)
+  await clearEvents()
+  if (events.length === 0) {
+    return
+  }
+
+  await bulkInsertEvents(events)
+}
 
 export const Bullet: any = types
   .model('Bullet', {
@@ -182,17 +336,53 @@ export const RootStore = types
         self.zoomedBulletId = snapshot.zoomedBulletId
       }
     },
+    updateBulletContent(bulletId: string, content: string) {
+      const bullet = self.findBulletById(bulletId)
+      if (!bullet) {
+        return
+      }
+
+      bullet.setContent(content)
+      emitEvent('bullet_content_updated', { id: bulletId, content })
+    },
+    updateBulletContext(bulletId: string, context: string) {
+      const bullet = self.findBulletById(bulletId)
+      if (!bullet) {
+        return
+      }
+
+      bullet.setContext(context)
+      emitEvent('bullet_context_updated', { id: bulletId, context })
+    },
+    setBulletCollapsed(bulletId: string, collapsed: boolean) {
+      const bullet = self.findBulletById(bulletId)
+      if (!bullet) {
+        return
+      }
+
+      bullet.setCollapsed(collapsed)
+      emitEvent('bullet_collapsed_updated', { id: bulletId, collapsed })
+    },
+    toggleBulletCollapsed(bulletId: string) {
+      const bullet = self.findBulletById(bulletId)
+      if (!bullet) {
+        return
+      }
+
+      bullet.toggleCollapsed()
+      emitEvent('bullet_collapsed_updated', { id: bulletId, collapsed: bullet.collapsed })
+    },
     indentBullet(bulletId: string) {
       const context = self.findBulletWithContext(bulletId)
       if (!context) return false
 
-      const { bullet, index } = context
+      const { bullet, index, parent, siblings } = context
 
       // Can't indent if it's the first bullet (no previous sibling)
       if (index === 0) return false
 
       // Get the previous sibling
-      const prevBullet = context.siblings[index - 1]
+      const prevBullet = siblings[index - 1]
 
       // Detach so we can reparent without killing observers
       const detachedBullet = detach(bullet)
@@ -201,7 +391,13 @@ export const RootStore = types
       prevBullet.addChild(detachedBullet)
 
       this.saveToHistory()
-      this.saveToLocalStorage()
+      emitEvent('bullet_indented', {
+        id: bulletId,
+        fromParentId: parent ? parent.id : null,
+        fromIndex: index,
+        toParentId: prevBullet.id,
+        toIndex: prevBullet.children.length - 1,
+      })
       return true
     },
     outdentBullet(bulletId: string) {
@@ -216,45 +412,74 @@ export const RootStore = types
       const parentContext = self.findBulletWithContext(parent.id)
       if (!parentContext) return false
 
+      const fromParentId = parent.id
+      const fromIndex = context.index
+      const targetParentId = parentContext.parent ? parentContext.parent.id : null
+      const targetIndex = parentContext.index + 1
+
       // Detach before re-inserting elsewhere
       const detachedBullet = detach(bullet)
 
       // Add as sibling of parent (right after parent)
       if (parentContext.parent) {
-        parentContext.parent.insertChildAt(parentContext.index + 1, detachedBullet)
+        parentContext.parent.insertChildAt(targetIndex, detachedBullet)
       } else {
-        self.bullets.splice(parentContext.index + 1, 0, detachedBullet)
+        self.bullets.splice(targetIndex, 0, detachedBullet)
       }
 
       this.saveToHistory()
-      this.saveToLocalStorage()
+      emitEvent('bullet_outdented', {
+        id: bulletId,
+        fromParentId,
+        fromIndex,
+        toParentId: targetParentId,
+        toIndex: targetIndex,
+      })
       return true
     },
     createAndInsertBullet(afterBulletId: string, asChild = false) {
+      const context = self.findBulletWithContext(afterBulletId)
+      if (!context) return null
+
       const newBullet = Bullet.create({
         id: nanoid(),
         content: '',
         context: '',
         children: [],
+        createdAt: Date.now(),
       })
 
-      const context = self.findBulletWithContext(afterBulletId)
-      if (!context) return null
-
       const { bullet, parent, index } = context
+      let parentId: ParentId
+      let insertIndex: number
 
       if (asChild) {
         bullet.insertChildAt(0, newBullet)
+        parentId = bullet.id
+        insertIndex = 0
       } else {
         if (parent) {
           parent.insertChildAt(index + 1, newBullet)
+          parentId = parent.id
+          insertIndex = index + 1
         } else {
-          self.bullets.splice(index + 1, 0, newBullet)
+          const rootIndex = index + 1
+          self.bullets.splice(rootIndex, 0, newBullet)
+          parentId = null
+          insertIndex = rootIndex
         }
       }
 
       this.saveToHistory()
-      this.saveToLocalStorage()
+      emitEvent('bullet_created', {
+        id: newBullet.id,
+        parentId,
+        index: insertIndex,
+        content: newBullet.content,
+        context: newBullet.context,
+        collapsed: newBullet.collapsed,
+        createdAt: newBullet.createdAt,
+      })
       return newBullet
     },
     deleteBullet(bulletId: string, skipConfirmation = false) {
@@ -264,6 +489,11 @@ export const RootStore = types
       }
 
       const { bullet, parent } = context
+      const deletionPayload = {
+        id: bullet.id,
+        parentId: parent ? parent.id : null,
+        index: context.index,
+      }
 
       // Check if bullet has children
       const hasChildren = bullet.children.length > 0
@@ -280,29 +510,27 @@ export const RootStore = types
         if (zoomedBullet && zoomedBullet.children.length === 1 && zoomedBullet.children[0].id === bulletId) {
           // Delete the last child (and its children if any)
           zoomedBullet.removeChild(bulletId)
+          emitEvent('bullet_deleted', deletionPayload)
           // Create a new empty bullet
-          const newBullet = this.createEmptyBullet(zoomedBullet)
+          const newBullet = this.createEmptyBullet(zoomedBullet, { skipHistory: true })
           this.saveToHistory()
-          this.saveToLocalStorage()
           return {
             success: true,
             hasChildren: false,
             newBulletId: newBullet?.id,
           }
         }
-      } else {
-        if (self.bullets.length === 1 && self.bullets[0].id === bulletId) {
-          // Delete the only bullet (and its children if any)
-          self.bullets.splice(0, 1)
-          // Create a new empty bullet
-          const newBullet = this.createEmptyBullet(null)
-          this.saveToHistory()
-          this.saveToLocalStorage()
-          return {
-            success: true,
-            hasChildren: false,
-            newBulletId: newBullet?.id,
-          }
+      } else if (self.bullets.length === 1 && self.bullets[0].id === bulletId) {
+        // Delete the only bullet (and its children if any)
+        self.bullets.splice(0, 1)
+        emitEvent('bullet_deleted', deletionPayload)
+        // Create a new empty bullet
+        const newBullet = this.createEmptyBullet(null, { skipHistory: true })
+        this.saveToHistory()
+        return {
+          success: true,
+          hasChildren: false,
+          newBulletId: newBullet?.id,
         }
       }
 
@@ -317,7 +545,7 @@ export const RootStore = types
       }
 
       this.saveToHistory()
-      this.saveToLocalStorage()
+      emitEvent('bullet_deleted', deletionPayload)
       return { success: true, hasChildren: false }
     },
     zoomToBullet(id: string | null) {
@@ -327,24 +555,7 @@ export const RootStore = types
       if (id) {
         const bullet = self.findBulletById(id)
         if (bullet && bullet.children.length === 0) {
-          const newBullet = Bullet.create({
-            id: nanoid(),
-            content: '',
-            context: '',
-            children: [],
-          })
-          bullet.addChild(newBullet)
-          this.saveToLocalStorage()
-
-          // Focus the new bullet after a short delay
-          setTimeout(() => {
-            const contentDiv = document.querySelector(
-              `[data-bullet-id="${newBullet.id}"] .bullet-content`,
-            ) as HTMLDivElement
-            if (contentDiv) {
-              contentDiv.focus()
-            }
-          }, 50)
+          this.createEmptyBullet(bullet, { skipHistory: true })
         }
       }
 
@@ -365,60 +576,38 @@ export const RootStore = types
 
       this.saveToHistory()
     },
-    loadFromLocalStorage() {
+    loadFromEventStore: flow(function* () {
       if (typeof window === 'undefined') return
-      const saved = localStorage.getItem('focus-data')
-      if (saved) {
+
+      let persistedBullets: PersistedBullet[] = []
+
+      if (isEventStoreAvailable()) {
         try {
-          const data = JSON.parse(saved)
-          self.bullets.clear()
-          data.bullets.forEach((b: any) => self.bullets.push(Bullet.create(b)))
-          // Initialize history with loaded state
-          this.saveToHistory()
-        } catch (e) {
-          console.error('Failed to load from localStorage', e)
+          const events = (yield getAllEvents()) as EventRecord[]
+          if (events.length > 0) {
+            persistedBullets = replayEvents(events)
+          } else {
+            persistedBullets = createWelcomeTree()
+            yield replaceEventStoreWithTree(persistedBullets)
+          }
+        } catch (error) {
+          console.error('Failed to load events from IndexedDB', error)
+          persistedBullets = createWelcomeTree()
         }
       } else {
-        // Initialize with a welcome bullet
-        const welcomeBullet = Bullet.create({
-          id: nanoid(),
-          content: 'Welcome to Focus!',
-          context: 'Press Shift+Enter to add notes. Click the bullet dot to zoom in.',
-          children: [],
-        })
-        const child1 = Bullet.create({
-          id: nanoid(),
-          content: 'Press Enter to create a new bullet',
-          context: '',
-          children: [],
-        })
-        const child2 = Bullet.create({
-          id: nanoid(),
-          content: 'Press Tab to indent',
-          context: '',
-          children: [],
-        })
-        const child3 = Bullet.create({
-          id: nanoid(),
-          content: 'Press Shift+Tab to outdent',
-          context: '',
-          children: [],
-        })
-        welcomeBullet.addChild(child1)
-        welcomeBullet.addChild(child2)
-        welcomeBullet.addChild(child3)
-        self.bullets.push(welcomeBullet)
-        this.saveToHistory()
-      }
-    },
-    saveToLocalStorage() {
-      if (typeof window === 'undefined') return
-      const data = {
-        bullets: getSnapshot(self.bullets),
+        persistedBullets = createWelcomeTree()
       }
 
-      localStorage.setItem('focus-data', JSON.stringify(data, null, 2))
-    },
+      runWithoutRecording(() => {
+        self.bullets.clear()
+        persistedBullets.forEach(node => self.bullets.push(Bullet.create(toSnapshot(node))))
+      })
+
+      self.zoomedBulletId = null
+      self.history.clear()
+      self.historyIndex = -1
+      this.saveToHistory()
+    }),
     exportData() {
       const data = {
         bullets: getSnapshot(self.bullets),
@@ -434,15 +623,23 @@ export const RootStore = types
           throw new Error('Invalid data format')
         }
 
-        self.bullets.clear()
-        data.bullets.forEach((b: any) => self.bullets.push(Bullet.create(b)))
-        self.zoomedBulletId = null
+        const normalized = data.bullets.map(normalizePersistedBullet)
 
-        // Reset history and save current state
+        runWithoutRecording(() => {
+          self.bullets.clear()
+          normalized.forEach(node => self.bullets.push(Bullet.create(toSnapshot(node))))
+        })
+
+        self.zoomedBulletId = null
         self.history.clear()
         self.historyIndex = -1
         this.saveToHistory()
-        this.saveToLocalStorage()
+
+        runWithoutRecordingAsync(async () => {
+          await replaceEventStoreWithTree(normalized)
+        }).catch(error => {
+          console.error('Failed to persist imported data to IndexedDB', error)
+        })
 
         return true
       } catch (e) {
@@ -451,44 +648,23 @@ export const RootStore = types
       }
     },
     resetToDefault() {
-      self.bullets.clear()
+      const welcomeTree = createWelcomeTree()
+
+      runWithoutRecording(() => {
+        self.bullets.clear()
+        welcomeTree.forEach(node => self.bullets.push(Bullet.create(toSnapshot(node))))
+      })
+
       self.zoomedBulletId = null
-
-      // Create welcome bullet
-      const welcomeBullet = Bullet.create({
-        id: nanoid(),
-        content: 'Welcome to Focus!',
-        context: 'Press Shift+Enter to add notes. Click the bullet dot to zoom in.',
-        children: [],
-      })
-      const child1 = Bullet.create({
-        id: nanoid(),
-        content: 'Press Enter to create a new bullet',
-        context: '',
-        children: [],
-      })
-      const child2 = Bullet.create({
-        id: nanoid(),
-        content: 'Press Tab to indent',
-        context: '',
-        children: [],
-      })
-      const child3 = Bullet.create({
-        id: nanoid(),
-        content: 'Press Shift+Tab to outdent',
-        context: '',
-        children: [],
-      })
-      welcomeBullet.addChild(child1)
-      welcomeBullet.addChild(child2)
-      welcomeBullet.addChild(child3)
-      self.bullets.push(welcomeBullet)
-
-      // Reset history
       self.history.clear()
       self.historyIndex = -1
       this.saveToHistory()
-      this.saveToLocalStorage()
+
+      runWithoutRecordingAsync(async () => {
+        await replaceEventStoreWithTree(welcomeTree)
+      }).catch(error => {
+        console.error('Failed to reset IndexedDB event store', error)
+      })
     },
     moveBulletUp(bulletId: string) {
       const context = self.findBulletWithContext(bulletId)
@@ -510,7 +686,12 @@ export const RootStore = types
       siblings.splice(index - 1, 0, detachedBullet)
 
       this.saveToHistory()
-      this.saveToLocalStorage()
+      emitEvent('bullet_moved', {
+        id: bulletId,
+        parentId: context.parent ? context.parent.id : null,
+        fromIndex: index,
+        toIndex: index - 1,
+      })
       return true
     },
     moveBulletDown(bulletId: string) {
@@ -533,25 +714,49 @@ export const RootStore = types
       siblings.splice(index + 1, 0, detachedBullet)
 
       this.saveToHistory()
-      this.saveToLocalStorage()
+      emitEvent('bullet_moved', {
+        id: bulletId,
+        parentId: context.parent ? context.parent.id : null,
+        fromIndex: index,
+        toIndex: index + 1,
+      })
       return true
     },
-    createEmptyBullet(parent: Instance<typeof Bullet> | null) {
+    createEmptyBullet(parent: Instance<typeof Bullet> | null, options?: { skipHistory?: boolean }) {
       const newBullet = Bullet.create({
         id: nanoid(),
         content: '',
         context: '',
         children: [],
+        createdAt: Date.now(),
       })
+
+      let parentId: ParentId
+      let index: number
 
       if (parent) {
         parent.addChild(newBullet)
+        parentId = parent.id
+        index = parent.children.length - 1
       } else {
         self.bullets.push(newBullet)
+        parentId = null
+        index = self.bullets.length - 1
       }
 
-      this.saveToHistory()
-      this.saveToLocalStorage()
+      emitEvent('bullet_created', {
+        id: newBullet.id,
+        parentId,
+        index,
+        content: newBullet.content,
+        context: newBullet.context,
+        collapsed: newBullet.collapsed,
+        createdAt: newBullet.createdAt,
+      })
+
+      if (!options?.skipHistory) {
+        this.saveToHistory()
+      }
 
       // Focus the new bullet after a short delay
       setTimeout(() => {

@@ -116,8 +116,7 @@ export const BulletItem = observer(
       if (contentRef.current) {
         const newContent = contentRef.current.textContent || ''
         if (newContent !== bullet.content) {
-          bullet.setContent(newContent)
-          store.saveToLocalStorage()
+          store.updateBulletContent(bullet.id, newContent)
         }
       }
     }
@@ -128,8 +127,7 @@ export const BulletItem = observer(
       if (contextRef.current) {
         const newContext = contextRef.current.textContent || ''
         if (newContext !== bullet.context) {
-          bullet.setContext(newContext)
-          store.saveToLocalStorage()
+          store.updateBulletContext(bullet.id, newContext)
         }
       }
     }
@@ -146,8 +144,7 @@ export const BulletItem = observer(
       if (!isAlive(bullet)) return
 
       e.stopPropagation()
-      bullet.toggleCollapsed()
-      store.saveToLocalStorage()
+      store.toggleBulletCollapsed(bullet.id)
     }
 
     const handleContentFocus = () => {
