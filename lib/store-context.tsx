@@ -1,72 +1,68 @@
-"use client";
+'use client'
 
-import type React from "react";
+import type React from 'react'
+import { createContext, useContext, useEffect, useRef } from 'react'
 
-import { createContext, useContext, useRef, useEffect } from "react";
-import { initializeStore, type IRootStore } from "./store";
+import { initializeStore, type IRootStore } from './store'
 
-const StoreContext = createContext<IRootStore | null>(null);
+const StoreContext = createContext<IRootStore | null>(null)
 
 export function StoreProvider({
   children,
   initialZoomedBulletId,
 }: {
-  children: React.ReactNode;
-  initialZoomedBulletId?: string | null;
+  children: React.ReactNode
+  initialZoomedBulletId?: string | null
 }) {
-  const storeRef = useRef<IRootStore | null>(null);
-  const hasLoadedRef = useRef(false);
+  const storeRef = useRef<IRootStore | null>(null)
+  const hasLoadedRef = useRef(false)
 
   if (!storeRef.current) {
-    storeRef.current = initializeStore();
+    storeRef.current = initializeStore()
   }
 
   useEffect(() => {
-    const store = storeRef.current;
+    const store = storeRef.current
     if (!store || hasLoadedRef.current) {
-      return;
+      return
     }
 
     if (store.bullets.length === 0) {
-      store.loadFromLocalStorage();
+      store.loadFromLocalStorage()
     }
 
-    hasLoadedRef.current = true;
-  }, []);
+    hasLoadedRef.current = true
+  }, [])
 
   useEffect(() => {
-    const store = storeRef.current;
+    const store = storeRef.current
     if (!store) {
-      return;
+      return
     }
 
     if (initialZoomedBulletId !== undefined) {
-      store.setZoomedBulletId(initialZoomedBulletId);
+      store.setZoomedBulletId(initialZoomedBulletId)
     }
-  }, [initialZoomedBulletId]);
+  }, [initialZoomedBulletId])
 
   useEffect(() => {
-    const store = storeRef.current;
-    if (!store) return;
+    const store = storeRef.current
+    if (!store) return
 
     const interval = setInterval(() => {
-      store.saveToLocalStorage();
-    }, 2000);
+      store.saveToLocalStorage()
+    }, 2000)
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => clearInterval(interval)
+  }, [])
 
-  return (
-    <StoreContext.Provider value={storeRef.current}>
-      {children}
-    </StoreContext.Provider>
-  );
+  return <StoreContext.Provider value={storeRef.current}>{children}</StoreContext.Provider>
 }
 
 export function useStore() {
-  const store = useContext(StoreContext);
+  const store = useContext(StoreContext)
   if (!store) {
-    throw new Error("useStore must be used within StoreProvider");
+    throw new Error('useStore must be used within StoreProvider')
   }
-  return store;
+  return store
 }

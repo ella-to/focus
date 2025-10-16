@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -39,16 +39,16 @@
   --radius: 0.625rem;
   --shadow-2xs: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.07);
   --shadow-xs: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.07);
-  --shadow-sm: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15),
-    4px 1px 2px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
-  --shadow: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15),
-    4px 1px 2px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
-  --shadow-md: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15),
-    4px 2px 4px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
-  --shadow-lg: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15),
-    4px 4px 6px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
-  --shadow-xl: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15),
-    4px 8px 10px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
+  --shadow-sm:
+    4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15), 4px 1px 2px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
+  --shadow:
+    4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15), 4px 1px 2px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
+  --shadow-md:
+    4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15), 4px 2px 4px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
+  --shadow-lg:
+    4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15), 4px 4px 6px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
+  --shadow-xl:
+    4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.15), 4px 8px 10px -1px hsl(238.3146 85.5769% 59.2157% / 0.15);
   --shadow-2xl: 4px 4px 0px 0px hsl(238.3146 85.5769% 59.2157% / 0.38);
 }
 

@@ -1,7 +1,8 @@
-import { Routes, Route } from "react-router-dom";
-import { Layout } from "./routes/Layout";
-import { Home } from "./routes/Home";
-import { BulletPage } from "./routes/BulletPage";
+import { Route, Routes } from 'react-router-dom'
+
+import { BulletPage } from './routes/BulletPage'
+import { Home } from './routes/Home'
+import { Layout } from './routes/Layout'
 
 function App() {
   return (
@@ -11,7 +12,7 @@ function App() {
         <Route path="/:bulletId" element={<BulletPage />} />
       </Route>
     </Routes>
-  );
+  )
 }
 
-export default App;
+export default App

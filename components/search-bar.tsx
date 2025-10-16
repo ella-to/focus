@@ -1,10 +1,10 @@
-"use client"
+'use client'
 
-import { observer } from "mobx-react-lite"
-import { Search, X } from "lucide-react"
-import { Input } from "@/components/ui/input"
-import { useStore } from "@/lib/store-context"
-import { useRef, useEffect } from "react"
+import { Input } from '@/components/ui/input'
+import { useStore } from '@/lib/store-context'
+import { Search, X } from 'lucide-react'
+import { observer } from 'mobx-react-lite'
+import { useEffect, useRef } from 'react'
 
 export const SearchBar = observer(() => {
   const store = useStore()
@@ -13,23 +13,23 @@ export const SearchBar = observer(() => {
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       // Cmd/Ctrl + F to focus search
-      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault()
         inputRef.current?.focus()
       }
       // Escape to clear search when focused
-      if (e.key === "Escape" && document.activeElement === inputRef.current) {
-        store.setSearchQuery("")
+      if (e.key === 'Escape' && document.activeElement === inputRef.current) {
+        store.setSearchQuery('')
         inputRef.current?.blur()
       }
     }
 
-    window.addEventListener("keydown", handleKeyPress)
-    return () => window.removeEventListener("keydown", handleKeyPress)
+    window.addEventListener('keydown', handleKeyPress)
+    return () => window.removeEventListener('keydown', handleKeyPress)
   }, [store])
 
   const handleClearSearch = () => {
-    store.setSearchQuery("")
+    store.setSearchQuery('')
     // Maintain focus on the input after clearing
     setTimeout(() => {
       inputRef.current?.focus()
@@ -44,15 +44,14 @@ export const SearchBar = observer(() => {
         type="text"
         placeholder="Search bullets... (Cmd+F)"
         value={store.searchQuery}
-        onChange={(e) => store.setSearchQuery(e.target.value)}
+        onChange={e => store.setSearchQuery(e.target.value)}
         className="pl-9 pr-9 h-9 bg-background/50 border-border/50 focus-visible:ring-1"
       />
       {store.searchQuery && (
         <button
           onClick={handleClearSearch}
           className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Clear search"
-        >
+          aria-label="Clear search">
           <X className="w-4 h-4" />
         </button>
       )}
@@ -60,4 +59,4 @@ export const SearchBar = observer(() => {
   )
 })
 
-SearchBar.displayName = "SearchBar"
+SearchBar.displayName = 'SearchBar'
