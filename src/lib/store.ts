@@ -1,4 +1,4 @@
-import { detach, flow, getSnapshot, types, type Instance } from 'mobx-state-tree'
+import { applySnapshot, detach, flow, getSnapshot, types, type Instance } from 'mobx-state-tree'
 import { nanoid } from 'nanoid'
 
 import { replayEvents, type PersistedBullet } from './event-replayer'
@@ -931,8 +931,8 @@ export const RootStore = types
 
         runWithoutRecording(() => {
           self.zoomedBulletId = null
-          const newBullets = persistedBullets.map(node => Bullet.create(toSnapshot(node)))
-          self.bullets.replace(newBullets)
+          const snapshot = persistedBullets.map(node => toSnapshot(node))
+          applySnapshot(self.bullets, snapshot)
         })
 
         if (previousZoomedId) {
@@ -966,8 +966,8 @@ export const RootStore = types
 
           runWithoutRecording(() => {
             self.zoomedBulletId = null
-            const newBullets = normalized.map(node => Bullet.create(toSnapshot(node)))
-            self.bullets.replace(newBullets)
+            const snapshot = normalized.map(node => toSnapshot(node))
+            applySnapshot(self.bullets, snapshot)
           })
           self.history.clear()
           self.historyIndex = -1
@@ -990,8 +990,8 @@ export const RootStore = types
 
         runWithoutRecording(() => {
           self.zoomedBulletId = null
-          const newBullets = welcomeTree.map(node => Bullet.create(toSnapshot(node)))
-          self.bullets.replace(newBullets)
+          const snapshot = welcomeTree.map(node => toSnapshot(node))
+          applySnapshot(self.bullets, snapshot)
         })
 
         self.history.clear()
