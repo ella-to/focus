@@ -95,6 +95,11 @@ export const BulletItem = observer(
     useEffect(() => {
       if (!isAlive(bullet)) return
 
+      const activeElement = document.activeElement as HTMLElement | null
+      if (activeElement?.getAttribute('data-search-input') === 'true') {
+        return
+      }
+
       if (focusedBulletId === bullet.id && contentRef.current && document.activeElement !== contentRef.current) {
         contentRef.current.focus()
         const range = document.createRange()
