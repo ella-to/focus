@@ -4,15 +4,15 @@ import { nanoid } from 'nanoid'
 import { replayEvents, type PersistedBullet } from './event-replayer'
 import {
   appendEvent,
+  createWorkspaceRecord,
+  DEFAULT_WORKSPACE,
+  deleteAllWorkspaces,
+  deleteWorkspaceRecord,
   getAllEvents,
   isEventStoreAvailable,
-  replaceWorkspaceEvents,
   listWorkspaces,
-  createWorkspaceRecord,
-  deleteWorkspaceRecord,
   renameWorkspaceRecord,
-  deleteAllWorkspaces,
-  DEFAULT_WORKSPACE,
+  replaceWorkspaceEvents,
   WORKSPACE_EXISTS_ERROR,
   type EventPayloadMap,
   type EventRecord,
@@ -509,9 +509,7 @@ export const RootStore = types
           }
         } else {
           const records = snapshotWorkspaces().map(record =>
-            record.name === currentName
-              ? { ...record, name: trimmed, updatedAt: Date.now() }
-              : record,
+            record.name === currentName ? { ...record, name: trimmed, updatedAt: Date.now() } : record,
           )
           applyWorkspaceRecords(records)
         }
@@ -905,9 +903,7 @@ export const RootStore = types
         if (typeof window === 'undefined') return
 
         const targetWorkspace =
-          workspaceName?.trim() ||
-          self.currentWorkspace ||
-          (self.workspaces[0]?.name ?? DEFAULT_WORKSPACE)
+          workspaceName?.trim() || self.currentWorkspace || (self.workspaces[0]?.name ?? DEFAULT_WORKSPACE)
 
         persistWorkspaceSelection(targetWorkspace)
 

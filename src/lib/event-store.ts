@@ -199,10 +199,7 @@ function withTransaction<T>(
   )
 }
 
-function withStore<T>(
-  mode: IDBTransactionMode,
-  handler: (store: IDBObjectStore) => Promise<T>,
-): Promise<T> {
+function withStore<T>(mode: IDBTransactionMode, handler: (store: IDBObjectStore) => Promise<T>): Promise<T> {
   return withTransaction(mode, [STORE_NAME], transaction => handler(transaction.objectStore(STORE_NAME)))
 }
 
@@ -494,9 +491,6 @@ export async function deleteAllWorkspaces(): Promise<void> {
     const workspaceStore = transaction.objectStore(WORKSPACE_STORE)
     const eventsStore = transaction.objectStore(STORE_NAME)
 
-    await Promise.all([
-      promisifyRequest(workspaceStore.clear()),
-      promisifyRequest(eventsStore.clear()),
-    ])
+    await Promise.all([promisifyRequest(workspaceStore.clear()), promisifyRequest(eventsStore.clear())])
   })
 }

@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -21,11 +20,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { WORKSPACE_EXISTS_ERROR } from '@/lib/event-store'
 import { useStore } from '@/lib/store-context'
 import { cn } from '@/lib/utils'
-import { WORKSPACE_EXISTS_ERROR } from '@/lib/event-store'
-import { observer } from 'mobx-react-lite'
 import { Check, ChevronsUpDown, Loader2, Pencil, Plus } from 'lucide-react'
+import { observer } from 'mobx-react-lite'
+import { useEffect, useRef, useState } from 'react'
 
 type DialogMode = 'create' | 'rename'
 
@@ -128,8 +128,7 @@ export const WorkspaceSwitcher = observer(() => {
             size="sm"
             className="h-9 min-w-[160px] justify-between gap-2 truncate px-3 font-medium"
             aria-label="Select workspace"
-            disabled={isLoading}
-          >
+            disabled={isLoading}>
             <span className="truncate text-left">{currentLabel}</span>
             <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
           </Button>
@@ -153,11 +152,7 @@ export const WorkspaceSwitcher = observer(() => {
               </CommandGroup>
               <CommandSeparator />
               <CommandGroup heading="Actions">
-                <CommandItem
-                  value="create-workspace"
-                  onSelect={() => handleOpenDialog('create')}
-                  className="gap-2"
-                >
+                <CommandItem value="create-workspace" onSelect={() => handleOpenDialog('create')} className="gap-2">
                   <Plus className="size-4" />
                   Create workspace
                 </CommandItem>
@@ -165,8 +160,7 @@ export const WorkspaceSwitcher = observer(() => {
                   value="rename-workspace"
                   onSelect={() => handleOpenDialog('rename')}
                   className="gap-2"
-                  disabled={!currentWorkspace}
-                >
+                  disabled={!currentWorkspace}>
                   <Pencil className="size-4" />
                   Rename current workspace
                 </CommandItem>
@@ -180,9 +174,7 @@ export const WorkspaceSwitcher = observer(() => {
         <DialogContent className="sm:max-w-[420px]">
           <form onSubmit={handleDialogSubmit} className="space-y-4">
             <DialogHeader>
-              <DialogTitle>
-                {dialogState.mode === 'create' ? 'Create workspace' : 'Rename workspace'}
-              </DialogTitle>
+              <DialogTitle>{dialogState.mode === 'create' ? 'Create workspace' : 'Rename workspace'}</DialogTitle>
               <DialogDescription>
                 {dialogState.mode === 'create'
                   ? 'Workspaces keep bullets grouped together. Give it a descriptive name.'
@@ -192,9 +184,7 @@ export const WorkspaceSwitcher = observer(() => {
             <Input
               ref={inputRef}
               value={dialogState.value}
-              onChange={event =>
-                setDialogState(prev => ({ ...prev, value: event.target.value, error: null }))
-              }
+              onChange={event => setDialogState(prev => ({ ...prev, value: event.target.value, error: null }))}
               placeholder="Workspace name"
               autoCapitalize="sentences"
               autoComplete="off"

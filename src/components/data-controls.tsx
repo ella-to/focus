@@ -154,8 +154,7 @@ export const DataControls = observer(({ onToggleShortcuts }: { onToggleShortcuts
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-            Current workspace:{' '}
-            <span className="font-medium text-foreground">{store.currentWorkspace}</span>
+            Current workspace: <span className="font-medium text-foreground">{store.currentWorkspace}</span>
           </div>
           <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Button variant="outline" onClick={() => setResetDialogOpen(false)} className="w-full sm:w-auto">

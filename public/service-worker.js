@@ -2,21 +2,13 @@ const APP_CACHE = 'focus-cache-v1'
 const APP_SHELL = ['/', '/index.html']
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(APP_CACHE).then(cache => cache.addAll(APP_SHELL)),
-  )
+  event.waitUntil(caches.open(APP_CACHE).then(cache => cache.addAll(APP_SHELL)))
   self.skipWaiting()
 })
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches
-      .keys()
-      .then(keys =>
-        Promise.all(
-          keys.filter(key => key !== APP_CACHE).map(key => caches.delete(key)),
-        ),
-      ),
+    caches.keys().then(keys => Promise.all(keys.filter(key => key !== APP_CACHE).map(key => caches.delete(key)))),
   )
   self.clients.claim()
 })
@@ -24,10 +16,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const { request } = event
 
-  if (
-    request.method !== 'GET' ||
-    (request.cache === 'only-if-cached' && request.mode !== 'same-origin')
-  ) {
+  if (request.method !== 'GET' || (request.cache === 'only-if-cached' && request.mode !== 'same-origin')) {
     return
   }
 
@@ -39,11 +28,7 @@ self.addEventListener('fetch', event => {
       try {
         const response = await fetch(request)
 
-        if (
-          response &&
-          response.status === 200 &&
-          (response.type === 'basic' || response.type === 'cors')
-        ) {
+        if (response && response.status === 200 && (response.type === 'basic' || response.type === 'cors')) {
           cache.put(request, response.clone())
         }
 
