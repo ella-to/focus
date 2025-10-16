@@ -7,13 +7,7 @@ import { initializeStore, type IRootStore } from './store'
 
 const StoreContext = createContext<IRootStore | null>(null)
 
-export function StoreProvider({
-  children,
-  initialZoomedBulletId,
-}: {
-  children: React.ReactNode
-  initialZoomedBulletId?: string | null
-}) {
+export function StoreProvider({ children }: { children: React.ReactNode }) {
   const storeRef = useRef<IRootStore | null>(null)
   const hasLoadedRef = useRef(false)
 
@@ -33,17 +27,6 @@ export function StoreProvider({
 
     hasLoadedRef.current = true
   }, [])
-
-  useEffect(() => {
-    const store = storeRef.current
-    if (!store) {
-      return
-    }
-
-    if (initialZoomedBulletId !== undefined) {
-      store.setZoomedBulletId(initialZoomedBulletId)
-    }
-  }, [initialZoomedBulletId])
 
   return <StoreContext.Provider value={storeRef.current}>{children}</StoreContext.Provider>
 }

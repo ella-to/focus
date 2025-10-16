@@ -14,51 +14,6 @@ import {
   type ParentId,
 } from './event-store'
 
-const UI_STATE_KEY = 'focus-ui-state'
-
-interface UIState {
-  zoomedBulletId: string | null
-}
-
-const defaultUiState: UIState = {
-  zoomedBulletId: null,
-}
-
-function readUiState(): UIState {
-  if (typeof window === 'undefined') {
-    return defaultUiState
-  }
-  const raw = window.localStorage.getItem(UI_STATE_KEY)
-  if (!raw) {
-    return defaultUiState
-  }
-  try {
-    const parsed = JSON.parse(raw)
-    return {
-      zoomedBulletId: typeof parsed?.zoomedBulletId === 'string' ? parsed.zoomedBulletId : null,
-    }
-  } catch (error) {
-    console.warn('[ui-state] Failed to parse UI state from localStorage:', error)
-    return defaultUiState
-  }
-}
-
-function writeUiState(patch: Partial<UIState>) {
-  if (typeof window === 'undefined') {
-    return
-  }
-  try {
-    const current = readUiState()
-    const next: UIState = {
-      ...current,
-      ...patch,
-    }
-    window.localStorage.setItem(UI_STATE_KEY, JSON.stringify(next))
-  } catch (error) {
-    console.warn('[ui-state] Failed to persist UI state to localStorage:', error)
-  }
-}
-
 let recordingDepth = 0
 let lastTimestamp = 0
 
@@ -605,7 +560,6 @@ export const RootStore = types
       },
       zoomToBullet(id: string | null) {
         self.zoomedBulletId = id
-        writeUiState({ zoomedBulletId: id })
 
         // If zooming into a bullet with no children, create an empty bullet
         if (id) {
@@ -630,15 +584,12 @@ export const RootStore = types
           self.zoomedBulletId = null
         }
 
-        writeUiState({ zoomedBulletId: self.zoomedBulletId })
-
         storeWithActions.saveToHistory()
       },
       loadFromEventStore: flow(function* () {
         if (typeof window === 'undefined') return
 
         let persistedBullets: PersistedBullet[] = []
-        const uiState = readUiState()
 
         if (isEventStoreAvailable()) {
           try {
@@ -661,13 +612,6 @@ export const RootStore = types
           self.bullets.clear()
           persistedBullets.forEach(node => self.bullets.push(Bullet.create(toSnapshot(node))))
         })
-
-        const activeZoom =
-          uiState.zoomedBulletId && self.findBulletById(uiState.zoomedBulletId) ? uiState.zoomedBulletId : null
-        self.zoomedBulletId = activeZoom
-        if (activeZoom !== uiState.zoomedBulletId) {
-          writeUiState({ zoomedBulletId: activeZoom })
-        }
 
         self.history.clear()
         self.historyIndex = -1
@@ -705,8 +649,6 @@ export const RootStore = types
           }).catch(error => {
             console.error('Failed to persist imported data to IndexedDB', error)
           })
-          writeUiState({ zoomedBulletId: null })
-
           return true
         } catch (e) {
           console.error('Failed to import data', e)
@@ -731,7 +673,6 @@ export const RootStore = types
         }).catch(error => {
           console.error('Failed to reset IndexedDB event store', error)
         })
-        writeUiState(defaultUiState)
       },
       moveBulletUp(bulletId: string) {
         const context = self.findBulletWithContext(bulletId)
@@ -839,7 +780,6 @@ export const RootStore = types
       },
       setZoomedBulletId(id: string | null) {
         self.zoomedBulletId = id
-        writeUiState({ zoomedBulletId: id })
       },
     }
   })
