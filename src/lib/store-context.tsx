@@ -21,9 +21,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
-    if (store.bullets.length === 0) {
-      void store.loadFromEventStore()
-    }
+    void store.bootstrap()
 
     hasLoadedRef.current = true
   }, [])

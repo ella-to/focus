@@ -2,6 +2,7 @@ import { Breadcrumbs } from '@/components/breadcrumbs'
 import { BulletList } from '@/components/bullet-list'
 import { DataControls } from '@/components/data-controls'
 import { SearchBar } from '@/components/search-bar'
+import { WorkspaceSwitcher } from '@/components/workspace-switcher'
 import { Button } from '@/components/ui/button'
 import { StoreProvider, useStore } from '@/lib/store-context'
 import { observer } from 'mobx-react-lite'
@@ -75,10 +76,15 @@ const HomeContent = observer(() => {
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center justify-between gap-4 px-6 py-3">
-          <h1 className="text-xl font-semibold text-foreground shrink-0">Focus</h1>
-          <SearchBar />
-          <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-xl font-semibold text-foreground">Focus</h1>
+            <WorkspaceSwitcher />
+          </div>
+          <div className="flex-1 basis-full min-w-[200px] sm:basis-auto">
+            <SearchBar />
+          </div>
+          <div className="flex items-center gap-2 sm:ml-auto">
             <DataControls onToggleShortcuts={() => setShowShortcuts(prev => !prev)} />
           </div>
         </div>

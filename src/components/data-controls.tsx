@@ -81,9 +81,24 @@ export const DataControls = observer(({ onToggleShortcuts }: { onToggleShortcuts
     e.target.value = ''
   }
 
-  const handleResetConfirm = () => {
-    store.resetToDefault()
-    setResetDialogOpen(false)
+  const handleDeleteCurrentWorkspace = async () => {
+    try {
+      await store.deleteCurrentWorkspace()
+      setResetDialogOpen(false)
+    } catch (error) {
+      console.error(error)
+      alert('Failed to delete the current workspace. Please try again.')
+    }
+  }
+
+  const handleDeleteAllWorkspaces = async () => {
+    try {
+      await store.deleteAllWorkspaces()
+      setResetDialogOpen(false)
+    } catch (error) {
+      console.error(error)
+      alert('Failed to delete all workspaces. Please try again.')
+    }
   }
 
   return (
@@ -131,20 +146,29 @@ export const DataControls = observer(({ onToggleShortcuts }: { onToggleShortcuts
       </DropdownMenu>
 
       <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>Reset to Default?</DialogTitle>
+            <DialogTitle>Reset Workspaces</DialogTitle>
             <DialogDescription>
-              This will delete all your data and reset to the default welcome message. This action cannot be undone.
+              Choose what to delete. Workspaces isolate bullets so you can keep personal and work notes separate.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setResetDialogOpen(false)}>
+          <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+            Current workspace:{' '}
+            <span className="font-medium text-foreground">{store.currentWorkspace}</span>
+          </div>
+          <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Button variant="outline" onClick={() => setResetDialogOpen(false)} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleResetConfirm}>
-              Reset
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:gap-3">
+              <Button variant="secondary" onClick={handleDeleteCurrentWorkspace} className="w-full sm:w-auto">
+                Delete Current Workspace
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteAllWorkspaces} className="w-full sm:w-auto">
+                Delete All Workspaces
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
