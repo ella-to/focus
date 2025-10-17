@@ -37,7 +37,7 @@ export const SearchBar = observer(() => {
   }
 
   return (
-    <div className="relative flex-1 max-w-md">
+    <div className="relative w-full min-w-0">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
       <Input
         ref={inputRef}
@@ -46,7 +46,7 @@ export const SearchBar = observer(() => {
         data-search-input="true"
         value={store.searchQuery}
         onChange={e => store.setSearchQuery(e.target.value)}
-        className="pl-9 pr-9 h-9 bg-background/50 border-border/50 focus-visible:ring-1"
+        className="w-full pl-9 pr-9 h-9 bg-background/50 border-border/50 focus-visible:ring-1"
       />
       {store.searchQuery && (
         <button
