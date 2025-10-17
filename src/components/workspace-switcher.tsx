@@ -191,7 +191,7 @@ export const WorkspaceSwitcher = observer(() => {
             <Layers className="size-4" />
           </Button>
           <Dialog open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-            <DialogContent className="max-w-none h-[calc(100vh-3rem)] gap-0 overflow-hidden p-0 sm:max-w-[420px] sm:h-auto sm:rounded-lg sm:p-6">
+            <DialogContent className="max-w-none h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] gap-0 overflow-hidden p-0 sm:max-w-[420px] sm:h-auto sm:w-auto sm:rounded-lg sm:p-6">
               <div className="flex h-full flex-col">
                 <div className="border-b border-border px-4 py-3 sm:px-0 sm:py-0">
                   <DialogTitle className="text-left text-lg font-semibold sm:text-xl">Workspaces</DialogTitle>
