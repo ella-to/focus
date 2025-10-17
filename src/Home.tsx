@@ -77,14 +77,14 @@ const HomeContent = observer(() => {
       {/* Header */}
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-20">
         <div className="flex w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-xl font-semibold text-foreground">Focus</h1>
-            <WorkspaceSwitcher />
+          <div className="flex items-center gap-3 min-w-0 text-foreground">
+            <h1 className="text-xl font-semibold">Focus</h1>
           </div>
-          <div className="flex-1 basis-full min-w-[200px] sm:basis-auto">
+          <div className="order-3 basis-full min-w-[200px] sm:order-none sm:flex-1">
             <SearchBar />
           </div>
-          <div className="flex items-center gap-2 sm:ml-auto">
+          <div className="ml-auto flex items-center gap-2 order-2 sm:order-none">
+            <WorkspaceSwitcher />
             <DataControls onToggleShortcuts={() => setShowShortcuts(prev => !prev)} />
           </div>
         </div>
