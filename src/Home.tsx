@@ -76,7 +76,7 @@ const HomeContent = observer(() => {
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-20">
-  <div className="flex w-full items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6">
+        <div className="flex w-full items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6">
           <div className="flex items-center gap-3 min-w-0 text-foreground">
             <h1 className="text-xl font-semibold shrink-0">Focus</h1>
           </div>

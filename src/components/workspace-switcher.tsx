@@ -217,7 +217,7 @@ export const WorkspaceSwitcher = observer(() => {
               <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-72 p-0" align="start">
+          <PopoverContent className="w-72 p-0" align="end">
             {commandList}
           </PopoverContent>
         </Popover>
