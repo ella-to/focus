@@ -1,7 +1,7 @@
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, ensureWorkspaceId, generateWorkspaceId } from './id'
 
 const DB_NAME = 'focus-event-store'
-const DB_VERSION = 4
+const DB_VERSION = 5
 const STORE_NAME = 'events'
 const WORKSPACE_STORE = 'workspaces'
 export const WORKSPACE_NOT_FOUND_ERROR = 'WORKSPACE_NOT_FOUND'
@@ -84,10 +84,16 @@ export interface EventPayloadMap {
   }
 }
 
+export interface EncryptedEventPayload {
+  __encrypted: true
+  iv: string
+  data: string
+}
+
 export type EventRecord<T extends EventType = EventType> = {
   id?: number
   type: T
-  payload: EventPayloadMap[T]
+  payload: EventPayloadMap[T] | EncryptedEventPayload
   timestamp: number
   workspaceId: string
 }
@@ -97,6 +103,9 @@ export interface WorkspaceRecord {
   name: string
   createdAt: number
   updatedAt: number
+  locked?: boolean
+  lockTestName?: string | null
+  lockTestValue?: string | null
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -145,6 +154,11 @@ async function upgradeDatabase(db: IDBDatabase, transaction: IDBTransaction, old
           name: rawName,
           createdAt,
           updatedAt,
+          locked: Boolean(record?.locked),
+          lockTestName:
+            typeof record?.lockTestName === 'string' ? String(record.lockTestName) : (record?.lockTestName ?? null),
+          lockTestValue:
+            typeof record?.lockTestValue === 'string' ? String(record.lockTestValue) : (record?.lockTestValue ?? null),
         }
       })
     } else {
@@ -162,6 +176,11 @@ async function upgradeDatabase(db: IDBDatabase, transaction: IDBTransaction, old
           name: rawName,
           createdAt,
           updatedAt,
+          locked: Boolean(record?.locked),
+          lockTestName:
+            typeof record?.lockTestName === 'string' ? String(record.lockTestName) : (record?.lockTestName ?? null),
+          lockTestValue:
+            typeof record?.lockTestValue === 'string' ? String(record.lockTestValue) : (record?.lockTestValue ?? null),
         }
       })
       workspaceStore = legacyStore
@@ -186,6 +205,9 @@ async function upgradeDatabase(db: IDBDatabase, transaction: IDBTransaction, old
       name: DEFAULT_WORKSPACE_NAME,
       createdAt: now,
       updatedAt: now,
+      locked: false,
+      lockTestName: null,
+      lockTestValue: null,
     }
     await promisifyRequest(workspaceStore.put(defaultWorkspace))
     existingWorkspaces.push(defaultWorkspace)
@@ -246,6 +268,19 @@ async function upgradeDatabase(db: IDBDatabase, transaction: IDBTransaction, old
         value.workspaceId = updatedId
         cursor.update(value)
       }
+    })
+  }
+
+  if (oldVersion < 5) {
+    await iterateCursor(workspaceStore.openCursor(), async cursor => {
+      const value = cursor.value as WorkspaceRecord
+      const updated: WorkspaceRecord = {
+        ...value,
+        locked: Boolean((value as any)?.locked),
+        lockTestName: typeof (value as any)?.lockTestName === 'string' ? String((value as any)?.lockTestName) : null,
+        lockTestValue: typeof (value as any)?.lockTestValue === 'string' ? String((value as any)?.lockTestValue) : null,
+      }
+      await promisifyRequest(cursor.update(updated))
     })
   }
 }
@@ -465,6 +500,9 @@ export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
         name: DEFAULT_WORKSPACE_NAME,
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        locked: false,
+        lockTestName: null,
+        lockTestValue: null,
       },
     ]
   }
@@ -479,7 +517,10 @@ export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
       const name = record?.name ? String(record.name) : DEFAULT_WORKSPACE_NAME
       const createdAt = typeof record?.createdAt === 'number' ? record.createdAt : Date.now()
       const updatedAt = typeof record?.updatedAt === 'number' ? record.updatedAt : createdAt
-      return { id, name, createdAt, updatedAt }
+      const locked = Boolean(record?.locked)
+      const lockTestName = record?.lockTestName ?? null
+      const lockTestValue = record?.lockTestValue ?? null
+      return { id, name, createdAt, updatedAt, locked, lockTestName, lockTestValue }
     })
   })
 
@@ -498,6 +539,9 @@ export async function createWorkspaceRecord(name: string): Promise<WorkspaceReco
     name: trimmed,
     createdAt: now,
     updatedAt: now,
+    locked: false,
+    lockTestName: null,
+    lockTestValue: null,
   }
 
   if (!isIndexedDbAvailable()) {
@@ -555,6 +599,9 @@ export async function renameWorkspaceRecord(id: string, name: string): Promise<W
       name: trimmed,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      locked: false,
+      lockTestName: null,
+      lockTestValue: null,
     }
   }
 
@@ -571,6 +618,48 @@ export async function renameWorkspaceRecord(id: string, name: string): Promise<W
     const updated: WorkspaceRecord = {
       ...existing,
       name: trimmed,
+      updatedAt: Date.now(),
+    }
+
+    await promisifyRequest(workspaceStore.put(updated))
+    return updated
+  })
+}
+
+export async function getWorkspaceRecord(id: string): Promise<WorkspaceRecord | null> {
+  if (!isIndexedDbAvailable()) {
+    return null
+  }
+
+  return withTransaction('readonly', [WORKSPACE_STORE], async transaction => {
+    const store = transaction.objectStore(WORKSPACE_STORE)
+    const record = (await promisifyRequest(store.get(id))) as WorkspaceRecord | undefined
+    return record ? { ...record } : null
+  })
+}
+
+export async function updateWorkspaceLockState(
+  id: string,
+  updates: { locked: boolean; lockTestName: string | null; lockTestValue: string | null },
+): Promise<WorkspaceRecord> {
+  if (!isIndexedDbAvailable()) {
+    throw new Error('IndexedDB is not available in this environment')
+  }
+
+  return withTransaction('readwrite', [WORKSPACE_STORE], async transaction => {
+    const workspaceStore = transaction.objectStore(WORKSPACE_STORE)
+    const existing = (await promisifyRequest(workspaceStore.get(id))) as WorkspaceRecord | undefined
+    if (!existing) {
+      const error = new Error(`Workspace "${id}" not found`)
+      ;(error as any).code = WORKSPACE_NOT_FOUND_ERROR
+      throw error
+    }
+
+    const updated: WorkspaceRecord = {
+      ...existing,
+      locked: updates.locked,
+      lockTestName: updates.lockTestName,
+      lockTestValue: updates.lockTestValue,
       updatedAt: Date.now(),
     }
 

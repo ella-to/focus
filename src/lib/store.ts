@@ -1,5 +1,6 @@
 import { applySnapshot, detach, flow, getSnapshot, types, type Instance } from 'mobx-state-tree'
 
+import { decryptString, deriveKey, encryptString, generateRandomVerificationString, generateSalt } from './crypto'
 import { replayEvents, type PersistedBullet } from './event-replayer'
 import {
   appendEvent,
@@ -7,10 +8,13 @@ import {
   deleteAllWorkspaces,
   deleteWorkspaceRecord,
   getAllEvents,
+  getWorkspaceRecord,
   isEventStoreAvailable,
   listWorkspaces,
   renameWorkspaceRecord,
   replaceWorkspaceEvents,
+  updateWorkspaceLockState,
+  type EncryptedEventPayload,
   type EventPayloadMap,
   type EventRecord,
   type EventType,
@@ -183,6 +187,45 @@ async function replaceEventStoreWithTree(workspaceId: string, nodes: PersistedBu
   await replaceWorkspaceEvents(workspaceId, events)
 }
 
+type LockVerificationPayload = {
+  salt: string
+  iv: string
+  data: string
+}
+
+function parseVerificationPayload(value: string | null | undefined): LockVerificationPayload | null {
+  if (!value) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(value)
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.salt === 'string' &&
+      typeof parsed.iv === 'string' &&
+      typeof parsed.data === 'string'
+    ) {
+      return { salt: parsed.salt, iv: parsed.iv, data: parsed.data }
+    }
+    return null
+  } catch (error) {
+    console.error('[store] Failed to parse verification payload', error)
+    return null
+  }
+}
+
+function isEncryptedPayload(payload: unknown): payload is EncryptedEventPayload {
+  return (
+    Boolean(payload) &&
+    typeof payload === 'object' &&
+    (payload as EncryptedEventPayload).__encrypted === true &&
+    typeof (payload as EncryptedEventPayload).iv === 'string' &&
+    typeof (payload as EncryptedEventPayload).data === 'string'
+  )
+}
+
 export const Bullet: any = types
   .model('Bullet', {
     id: types.identifier,
@@ -233,6 +276,9 @@ const WorkspaceModel = types.model('Workspace', {
   name: types.string,
   createdAt: types.number,
   updatedAt: types.number,
+  locked: types.optional(types.boolean, false),
+  lockTestName: types.maybeNull(types.string),
+  lockTestValue: types.maybeNull(types.string),
 })
 
 export const RootStore = types
@@ -244,6 +290,7 @@ export const RootStore = types
     searchQuery: types.optional(types.string, ''),
     workspaces: types.array(WorkspaceModel),
     currentWorkspace: types.maybeNull(types.string),
+    lockedWorkspaceId: types.maybeNull(types.string),
     isBootstrapped: types.optional(types.boolean, false),
   })
   .views(self => ({
@@ -338,6 +385,10 @@ export const RootStore = types
     get currentWorkspaceRecord() {
       return self.workspaces.find(workspace => workspace.id === self.currentWorkspace) ?? null
     },
+    get isCurrentWorkspaceLocked() {
+      if (!self.currentWorkspace) return false
+      return this.currentWorkspaceRecord?.locked ?? false
+    },
   }))
   .actions(self => {
     const storeWithActions = self as typeof self & {
@@ -358,6 +409,13 @@ export const RootStore = types
       })
 
       self.workspaces.replace(sorted.map(record => WorkspaceModel.create(record)))
+
+      if (self.lockedWorkspaceId) {
+        const lockedRecord = self.workspaces.find(workspace => workspace.id === self.lockedWorkspaceId)
+        if (!lockedRecord?.locked) {
+          self.lockedWorkspaceId = null
+        }
+      }
     }
 
     const snapshotWorkspaces = (): WorkspaceRecord[] =>
@@ -366,11 +424,17 @@ export const RootStore = types
         name: workspace.name,
         createdAt: workspace.createdAt,
         updatedAt: workspace.updatedAt,
+        locked: workspace.locked,
+        lockTestName: workspace.lockTestName,
+        lockTestValue: workspace.lockTestValue,
       }))
 
     const persistWorkspaceSelection = (workspaceId: string | null) => {
       setActiveWorkspace(workspaceId)
       self.currentWorkspace = workspaceId
+      if (!workspaceId) {
+        self.lockedWorkspaceId = null
+      }
     }
 
     return {
@@ -538,6 +602,10 @@ export const RootStore = types
           return
         }
 
+        if (self.lockedWorkspaceId === currentId) {
+          self.lockedWorkspaceId = null
+        }
+
         if (isEventStoreAvailable()) {
           try {
             yield deleteWorkspaceRecord(currentId)
@@ -608,6 +676,8 @@ export const RootStore = types
         }
       }),
       deleteAllWorkspaces: flow(function* () {
+        self.lockedWorkspaceId = null
+
         if (isEventStoreAvailable()) {
           try {
             yield deleteAllWorkspaces()
@@ -656,6 +726,252 @@ export const RootStore = types
           }
           applyWorkspaceRecords([defaultRecord])
           yield storeWithActions.loadFromEventStore(defaultRecord.id)
+        }
+      }),
+      lockWorkspace: flow(function* (workspaceId: string, password: string) {
+        const trimmedId = workspaceId.trim()
+        if (!trimmedId) {
+          return
+        }
+
+        const target = self.workspaces.find(workspace => workspace.id === trimmedId)
+        if (!target) {
+          const error = new Error('Workspace not found')
+          ;(error as any).code = 'WORKSPACE_NOT_FOUND'
+          throw error
+        }
+
+        if (!password) {
+          const error = new Error('Password is required')
+          ;(error as any).code = 'WORKSPACE_PASSWORD_REQUIRED'
+          throw error
+        }
+
+        if (target.locked) {
+          return
+        }
+
+        if (!isEventStoreAvailable()) {
+          const error = new Error('Event store is not available')
+          ;(error as any).code = 'EVENT_STORE_UNAVAILABLE'
+          throw error
+        }
+
+        try {
+          const events = (yield getAllEvents(trimmedId)) as EventRecord[]
+          const salt = generateSalt()
+          const key = (yield deriveKey(password, salt)) as CryptoKey
+          const verificationName = generateRandomVerificationString()
+          const verificationEncrypted = (yield encryptString(key, verificationName)) as {
+            ciphertext: string
+            iv: string
+          }
+
+          const encryptedEvents: Array<Omit<EventRecord, 'id' | 'workspaceId'>> = []
+
+          for (const event of events) {
+            if (event.type.startsWith('workspace_')) {
+              encryptedEvents.push({
+                type: event.type,
+                payload: event.payload,
+                timestamp: event.timestamp,
+              })
+              continue
+            }
+
+            const plaintext = JSON.stringify(event.payload)
+            const encryptedPayload = (yield encryptString(key, plaintext)) as { ciphertext: string; iv: string }
+            encryptedEvents.push({
+              type: event.type,
+              payload: {
+                __encrypted: true,
+                iv: encryptedPayload.iv,
+                data: encryptedPayload.ciphertext,
+              },
+              timestamp: event.timestamp,
+            })
+          }
+
+          yield replaceWorkspaceEvents(trimmedId, encryptedEvents)
+
+          const verificationPayload: LockVerificationPayload = {
+            salt,
+            iv: verificationEncrypted.iv,
+            data: verificationEncrypted.ciphertext,
+          }
+
+          const updatedRecord = (yield updateWorkspaceLockState(trimmedId, {
+            locked: true,
+            lockTestName: verificationName,
+            lockTestValue: JSON.stringify(verificationPayload),
+          })) as WorkspaceRecord
+
+          target.locked = true
+          target.lockTestName = updatedRecord.lockTestName ?? verificationName
+          target.lockTestValue = updatedRecord.lockTestValue ?? JSON.stringify(verificationPayload)
+
+          if (self.currentWorkspace === trimmedId) {
+            self.lockedWorkspaceId = trimmedId
+
+            runWithoutRecording(() => {
+              self.zoomedBulletId = null
+              applySnapshot(self.bullets, [])
+            })
+
+            self.history.clear()
+            self.historyIndex = -1
+          }
+
+          return true
+        } catch (error) {
+          console.error('[store] Failed to lock workspace', error)
+          throw error
+        }
+      }),
+      unlockWorkspace: flow(function* (workspaceId: string, password: string) {
+        const trimmedId = workspaceId.trim()
+        if (!trimmedId) {
+          return
+        }
+
+        const target = self.workspaces.find(workspace => workspace.id === trimmedId)
+        if (!target) {
+          const error = new Error('Workspace not found')
+          ;(error as any).code = 'WORKSPACE_NOT_FOUND'
+          throw error
+        }
+
+        if (!target.locked) {
+          return
+        }
+
+        if (!password) {
+          const error = new Error('Password is required')
+          ;(error as any).code = 'WORKSPACE_PASSWORD_REQUIRED'
+          throw error
+        }
+
+        if (!isEventStoreAvailable()) {
+          const error = new Error('Event store is not available')
+          ;(error as any).code = 'EVENT_STORE_UNAVAILABLE'
+          throw error
+        }
+
+        try {
+          const persistedRecord = (yield getWorkspaceRecord(trimmedId)) as WorkspaceRecord | undefined
+          const verificationName = persistedRecord?.lockTestName ?? target.lockTestName
+          const verificationPayload = parseVerificationPayload(persistedRecord?.lockTestValue ?? target.lockTestValue)
+
+          if (!verificationName || !verificationPayload) {
+            const error = new Error('Workspace lock metadata is missing or corrupted')
+            ;(error as any).code = 'WORKSPACE_LOCK_METADATA_MISSING'
+            throw error
+          }
+
+          let key: CryptoKey
+          try {
+            key = (yield deriveKey(password, verificationPayload.salt)) as CryptoKey
+          } catch (deriveError) {
+            console.error('[store] Failed to derive key during unlock', deriveError)
+            const error = new Error('Unable to unlock workspace')
+            ;(error as any).code = 'WORKSPACE_UNLOCK_FAILED'
+            throw error
+          }
+
+          let verificationResult: string
+          try {
+            verificationResult = (yield decryptString(key, verificationPayload.data, verificationPayload.iv)) as string
+          } catch (decryptError) {
+            console.error('[store] Failed to verify workspace password', decryptError)
+            const error = new Error('Incorrect password')
+            ;(error as any).code = 'WORKSPACE_UNLOCK_FAILED'
+            throw error
+          }
+
+          if (verificationResult !== verificationName) {
+            const error = new Error('Incorrect password')
+            ;(error as any).code = 'WORKSPACE_UNLOCK_FAILED'
+            throw error
+          }
+
+          const events = (yield getAllEvents(trimmedId)) as EventRecord[]
+          const decryptedEvents: Array<Omit<EventRecord, 'id' | 'workspaceId'>> = []
+
+          for (const event of events) {
+            if (event.type.startsWith('workspace_')) {
+              decryptedEvents.push({
+                type: event.type,
+                payload: event.payload,
+                timestamp: event.timestamp,
+              })
+              continue
+            }
+
+            if (!isEncryptedPayload(event.payload)) {
+              const error = new Error('Encountered unencrypted event while unlocking workspace')
+              ;(error as any).code = 'WORKSPACE_UNLOCK_FAILED'
+              throw error
+            }
+
+            let plaintext: string
+            try {
+              plaintext = (yield decryptString(key, event.payload.data, event.payload.iv)) as string
+            } catch (decryptError) {
+              console.error('[store] Failed to decrypt workspace events', decryptError)
+              const error = new Error('Unable to decrypt workspace events')
+              ;(error as any).code = 'WORKSPACE_UNLOCK_FAILED'
+              throw error
+            }
+
+            try {
+              const parsedPayload = JSON.parse(plaintext)
+              decryptedEvents.push({
+                type: event.type,
+                payload: parsedPayload,
+                timestamp: event.timestamp,
+              })
+            } catch (parseError) {
+              console.error('[store] Failed to parse decrypted payload', parseError)
+              const error = new Error('Unable to decrypt workspace events')
+              ;(error as any).code = 'WORKSPACE_UNLOCK_FAILED'
+              throw error
+            }
+          }
+
+          yield replaceWorkspaceEvents(trimmedId, decryptedEvents)
+
+          const updatedRecord = (yield updateWorkspaceLockState(trimmedId, {
+            locked: false,
+            lockTestName: null,
+            lockTestValue: null,
+          })) as WorkspaceRecord
+
+          target.locked = Boolean(updatedRecord.locked)
+          target.lockTestName = updatedRecord.lockTestName ?? null
+          target.lockTestValue = updatedRecord.lockTestValue ?? null
+
+          if (self.lockedWorkspaceId === trimmedId) {
+            self.lockedWorkspaceId = null
+          }
+
+          if (self.currentWorkspace === trimmedId) {
+            yield storeWithActions.loadFromEventStore(trimmedId)
+          }
+
+          return true
+        } catch (error) {
+          if (!(error instanceof Error)) {
+            console.error('[store] Unknown error during unlock', error)
+            const wrapped = new Error('Unable to unlock workspace')
+            ;(wrapped as any).code = 'WORKSPACE_UNLOCK_FAILED'
+            throw wrapped
+          }
+
+          if (!(error as any).code) {
+            ;(error as any).code = 'WORKSPACE_UNLOCK_FAILED'
+          }
+
+          throw error
         }
       }),
       setSearchQuery(query: string) {
@@ -950,6 +1266,22 @@ export const RootStore = types
 
         persistWorkspaceSelection(resolvedWorkspaceId)
 
+        const workspaceRecord = self.workspaces.find(workspace => workspace.id === resolvedWorkspaceId) ?? null
+        if (workspaceRecord?.locked) {
+          self.lockedWorkspaceId = resolvedWorkspaceId
+
+          runWithoutRecording(() => {
+            self.zoomedBulletId = null
+            applySnapshot(self.bullets, [])
+          })
+
+          self.history.clear()
+          self.historyIndex = -1
+          return
+        }
+
+        self.lockedWorkspaceId = null
+
         let persistedBullets: PersistedBullet[] = []
 
         if (isEventStoreAvailable()) {
@@ -1195,6 +1527,7 @@ export function initializeStore() {
       searchQuery: '',
       workspaces: [],
       currentWorkspace: null,
+      lockedWorkspaceId: null,
       isBootstrapped: false,
     })
   }
