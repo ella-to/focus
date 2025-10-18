@@ -130,8 +130,7 @@ const HomeContent = observer(() => {
   }, [store.isBootstrapped, store.currentWorkspace, store.zoomedBulletId, routeWorkspaceId, routeBulletId, navigate])
 
   const isStoreReady = store.isBootstrapped && store.currentWorkspace === routeWorkspaceId && store.historyIndex >= 0
-  const bulletExists =
-    isStoreReady && routeBulletId ? store.findBulletById(routeBulletId) : null
+  const bulletExists = isStoreReady && routeBulletId ? store.findBulletById(routeBulletId) : null
   const showNotFound = isStoreReady && routeBulletId !== null && !bulletExists
 
   const handleReturnHome = () => {

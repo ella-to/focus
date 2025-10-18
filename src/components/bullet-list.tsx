@@ -201,7 +201,7 @@ export const BulletList = observer(() => {
 
       const { bullet, parent, siblings } = context
       const bulletIndex = siblings.findIndex((b: any) => b.id === bullet.id)
-  const workspaceId = store.currentWorkspace
+      const workspaceId = store.currentWorkspace
 
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') {
         e.preventDefault()

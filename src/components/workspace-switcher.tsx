@@ -24,8 +24,8 @@ import { useStore } from '@/lib/store-context'
 import { cn } from '@/lib/utils'
 import { Check, ChevronsUpDown, Layers, Loader2, Pencil, Plus } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 
 type DialogMode = 'create' | 'rename'
 
@@ -102,7 +102,7 @@ export const WorkspaceSwitcher = observer(() => {
       mode,
       error: null,
       loading: false,
-      value: mode === 'rename' ? currentWorkspaceRecord?.name ?? '' : '',
+      value: mode === 'rename' ? (currentWorkspaceRecord?.name ?? '') : '',
     })
   }
 
@@ -148,9 +148,7 @@ export const WorkspaceSwitcher = observer(() => {
   }
 
   const isLoading = !store.isBootstrapped && workspaces.length === 0
-  const currentLabel = isLoading
-    ? 'Loading workspaces...'
-    : currentWorkspaceRecord?.name || 'Select workspace'
+  const currentLabel = isLoading ? 'Loading workspaces...' : currentWorkspaceRecord?.name || 'Select workspace'
   const commandList = (
     <Command className="h-full">
       <CommandInput placeholder="Search workspaces" autoFocus={!isMobile} />

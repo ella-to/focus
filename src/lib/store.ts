@@ -17,12 +17,7 @@ import {
   type ParentId,
   type WorkspaceRecord,
 } from './event-store'
-import {
-  DEFAULT_WORKSPACE_ID,
-  DEFAULT_WORKSPACE_NAME,
-  generateBulletId,
-  generateWorkspaceId,
-} from './id'
+import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, generateBulletId, generateWorkspaceId } from './id'
 
 let recordingDepth = 0
 let lastTimestamp = 0
@@ -979,10 +974,7 @@ export const RootStore = types
                   payload: event.payload,
                   timestamp: event.timestamp,
                 }))
-                yield replaceWorkspaceEvents(resolvedWorkspaceId, [
-                  ...normalizedWorkspaceEvents,
-                  ...creationEvents,
-                ])
+                yield replaceWorkspaceEvents(resolvedWorkspaceId, [...normalizedWorkspaceEvents, ...creationEvents])
               } else {
                 persistedBullets = createWelcomeTree()
                 yield replaceEventStoreWithTree(resolvedWorkspaceId, persistedBullets)

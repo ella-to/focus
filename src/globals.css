@@ -64,7 +64,6 @@
   opacity: 0.3;
 }
 
-.bullet-content:focus:before,
 .bullet-context:focus:before {
   content: none;
 }

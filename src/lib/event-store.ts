@@ -1,9 +1,4 @@
-import {
-  DEFAULT_WORKSPACE_ID,
-  DEFAULT_WORKSPACE_NAME,
-  ensureWorkspaceId,
-  generateWorkspaceId,
-} from './id'
+import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, ensureWorkspaceId, generateWorkspaceId } from './id'
 
 const DB_NAME = 'focus-event-store'
 const DB_VERSION = 4
@@ -154,7 +149,7 @@ async function upgradeDatabase(db: IDBDatabase, transaction: IDBTransaction, old
       })
     } else {
       existingWorkspaces = records.map(record => {
-  const rawId = record?.id ? String(record.id) : 'default'
+        const rawId = record?.id ? String(record.id) : 'default'
         const normalizedId = ensureWorkspaceId(rawId)
         if (normalizedId !== rawId) {
           idUpdates.set(rawId, normalizedId)
