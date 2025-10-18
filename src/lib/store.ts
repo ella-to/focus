@@ -1,11 +1,9 @@
 import { applySnapshot, detach, flow, getSnapshot, types, type Instance } from 'mobx-state-tree'
-import { nanoid } from 'nanoid'
 
 import { replayEvents, type PersistedBullet } from './event-replayer'
 import {
   appendEvent,
   createWorkspaceRecord,
-  DEFAULT_WORKSPACE,
   deleteAllWorkspaces,
   deleteWorkspaceRecord,
   getAllEvents,
@@ -13,20 +11,25 @@ import {
   listWorkspaces,
   renameWorkspaceRecord,
   replaceWorkspaceEvents,
-  WORKSPACE_EXISTS_ERROR,
   type EventPayloadMap,
   type EventRecord,
   type EventType,
   type ParentId,
   type WorkspaceRecord,
 } from './event-store'
+import {
+  DEFAULT_WORKSPACE_ID,
+  DEFAULT_WORKSPACE_NAME,
+  generateBulletId,
+  generateWorkspaceId,
+} from './id'
 
 let recordingDepth = 0
 let lastTimestamp = 0
-let activeWorkspace = DEFAULT_WORKSPACE
+let activeWorkspace: string | null = null
 
-function setActiveWorkspace(name: string) {
-  activeWorkspace = name
+function setActiveWorkspace(id: string | null) {
+  activeWorkspace = id
 }
 
 function getActiveWorkspace() {
@@ -67,8 +70,12 @@ function emitEvent<K extends EventType>(type: K, payload: EventPayloadMap[K]) {
   }
 
   const timestamp = nextTimestamp()
-  const workspace = getActiveWorkspace()
-  void appendEvent(workspace, { type, payload, timestamp }).catch(error => {
+  const workspaceId = getActiveWorkspace()
+  if (!workspaceId) {
+    return
+  }
+
+  void appendEvent(workspaceId, { type, payload, timestamp }).catch(error => {
     console.error(`[event-store] Failed to append event "${type}"`, error)
   })
 }
@@ -107,7 +114,7 @@ function createPersistedBullet({
   children?: PersistedBullet[]
 }): PersistedBullet {
   return {
-    id: nanoid(),
+    id: generateBulletId(),
     content,
     context,
     collapsed,
@@ -138,8 +145,8 @@ function createWelcomeTree(): PersistedBullet[] {
 function createCreationEvents(
   nodes: PersistedBullet[],
   parentId: ParentId,
-): Array<Omit<EventRecord, 'id' | 'workspace'>> {
-  const events: Array<Omit<EventRecord, 'id' | 'workspace'>> = []
+): Array<Omit<EventRecord, 'id' | 'workspaceId'>> {
+  const events: Array<Omit<EventRecord, 'id' | 'workspaceId'>> = []
   nodes.forEach((node, index) => {
     events.push({
       type: 'bullet_created',
@@ -162,13 +169,13 @@ function createCreationEvents(
   return events
 }
 
-async function replaceEventStoreWithTree(workspace: string, nodes: PersistedBullet[]) {
+async function replaceEventStoreWithTree(workspaceId: string, nodes: PersistedBullet[]) {
   if (!isEventStoreAvailable()) {
     return
   }
 
   const events = createCreationEvents(nodes, null)
-  await replaceWorkspaceEvents(workspace, events)
+  await replaceWorkspaceEvents(workspaceId, events)
 }
 
 export const Bullet: any = types
@@ -217,7 +224,8 @@ export const Bullet: any = types
   }))
 
 const WorkspaceModel = types.model('Workspace', {
-  name: types.identifier,
+  id: types.identifier,
+  name: types.string,
   createdAt: types.number,
   updatedAt: types.number,
 })
@@ -230,7 +238,7 @@ export const RootStore = types
     historyIndex: types.optional(types.number, -1),
     searchQuery: types.optional(types.string, ''),
     workspaces: types.array(WorkspaceModel),
-    currentWorkspace: types.optional(types.string, DEFAULT_WORKSPACE),
+    currentWorkspace: types.maybeNull(types.string),
     isBootstrapped: types.optional(types.boolean, false),
   })
   .views(self => ({
@@ -322,11 +330,8 @@ export const RootStore = types
       const bullets = this.zoomedBullet ? this.zoomedBullet.children : self.bullets
       return bullets.filter((bullet: Instance<typeof Bullet>) => this.bulletMatchesSearch(bullet, self.searchQuery))
     },
-    get workspaceNames() {
-      return self.workspaces.map(workspace => workspace.name)
-    },
     get currentWorkspaceRecord() {
-      return self.workspaces.find(workspace => workspace.name === self.currentWorkspace) ?? null
+      return self.workspaces.find(workspace => workspace.id === self.currentWorkspace) ?? null
     },
   }))
   .actions(self => {
@@ -336,7 +341,7 @@ export const RootStore = types
         parent: Instance<typeof Bullet> | null,
         options?: { skipHistory?: boolean },
       ): Instance<typeof Bullet>
-      loadFromEventStore(workspaceName?: string): Promise<void>
+      loadFromEventStore(workspaceId?: string): Promise<void>
     }
 
     const applyWorkspaceRecords = (records: WorkspaceRecord[]) => {
@@ -352,23 +357,27 @@ export const RootStore = types
 
     const snapshotWorkspaces = (): WorkspaceRecord[] =>
       self.workspaces.map(workspace => ({
+        id: workspace.id,
         name: workspace.name,
         createdAt: workspace.createdAt,
         updatedAt: workspace.updatedAt,
       }))
 
-    const persistWorkspaceSelection = (name: string) => {
-      setActiveWorkspace(name)
-      self.currentWorkspace = name
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('focus-current-workspace', name)
-      }
+    const persistWorkspaceSelection = (workspaceId: string | null) => {
+      setActiveWorkspace(workspaceId)
+      self.currentWorkspace = workspaceId
     }
 
     return {
-      bootstrap: flow(function* () {
+      bootstrap: flow(function* (initialWorkspaceId?: string) {
         if (self.isBootstrapped) {
-          return
+          if (initialWorkspaceId && initialWorkspaceId !== self.currentWorkspace) {
+            const candidate = self.workspaces.find(workspace => workspace.id === initialWorkspaceId)
+            if (candidate) {
+              yield storeWithActions.loadFromEventStore(candidate.id)
+            }
+          }
+          return self.currentWorkspace
         }
 
         let records: WorkspaceRecord[] = []
@@ -384,25 +393,21 @@ export const RootStore = types
         if (records.length === 0) {
           const now = Date.now()
           let fallbackRecord: WorkspaceRecord = {
-            name: DEFAULT_WORKSPACE,
+            id: DEFAULT_WORKSPACE_ID,
+            name: DEFAULT_WORKSPACE_NAME,
             createdAt: now,
             updatedAt: now,
           }
 
           if (isEventStoreAvailable()) {
             try {
-              fallbackRecord = (yield createWorkspaceRecord(DEFAULT_WORKSPACE)) as WorkspaceRecord
-            } catch (error) {
-              if ((error as any)?.code !== WORKSPACE_EXISTS_ERROR) {
-                console.error('[store] Failed to create default workspace', error)
-              }
-            }
-
-            try {
+              fallbackRecord = (yield createWorkspaceRecord(DEFAULT_WORKSPACE_NAME)) as WorkspaceRecord
               records = (yield listWorkspaces()) as WorkspaceRecord[]
             } catch (error) {
-              console.error('[store] Failed to refresh workspace list', error)
+              console.error('[store] Failed to create default workspace', error)
             }
+          } else {
+            records = [fallbackRecord]
           }
 
           if (records.length === 0) {
@@ -412,26 +417,30 @@ export const RootStore = types
 
         applyWorkspaceRecords(records)
 
-        const storedWorkspace =
-          typeof window !== 'undefined' ? window.localStorage.getItem('focus-current-workspace') : null
+        const trimmedInitialId = initialWorkspaceId?.trim() || null
+        const fallbackWorkspaceId = records[0]?.id ?? null
+        const targetWorkspaceId =
+          trimmedInitialId && records.some(workspace => workspace.id === trimmedInitialId)
+            ? trimmedInitialId
+            : fallbackWorkspaceId
 
-        const fallbackWorkspace = records[0]?.name ?? DEFAULT_WORKSPACE
-        const targetWorkspace =
-          storedWorkspace && records.some(workspace => workspace.name === storedWorkspace)
-            ? storedWorkspace
-            : fallbackWorkspace
-
-        yield storeWithActions.loadFromEventStore(targetWorkspace)
+        if (targetWorkspaceId) {
+          yield storeWithActions.loadFromEventStore(targetWorkspaceId)
+        } else {
+          persistWorkspaceSelection(null)
+          self.bullets.clear()
+        }
 
         self.isBootstrapped = true
+        return self.currentWorkspace
       }),
-      selectWorkspace: flow(function* (workspaceName: string) {
-        const trimmed = workspaceName.trim()
+      selectWorkspace: flow(function* (workspaceId: string) {
+        const trimmed = workspaceId.trim()
         if (!trimmed || trimmed === self.currentWorkspace) {
           return
         }
 
-        if (!self.workspaces.some(workspace => workspace.name === trimmed)) {
+        if (!self.workspaces.some(workspace => workspace.id === trimmed)) {
           console.warn(`[store] Workspace "${trimmed}" not found`)
           return
         }
@@ -446,36 +455,42 @@ export const RootStore = types
           throw error
         }
 
-        if (self.workspaces.some(workspace => workspace.name === trimmed)) {
-          const error = new Error(`Workspace "${trimmed}" already exists`)
-          ;(error as any).code = WORKSPACE_EXISTS_ERROR
-          throw error
-        }
+        let record: WorkspaceRecord
 
         if (isEventStoreAvailable()) {
           try {
-            yield createWorkspaceRecord(trimmed)
+            record = (yield createWorkspaceRecord(trimmed)) as WorkspaceRecord
+            yield appendEvent(record.id, {
+              type: 'workspace_created',
+              payload: { id: record.id, name: record.name, createdAt: record.createdAt },
+              timestamp: nextTimestamp(),
+            })
             const records = (yield listWorkspaces()) as WorkspaceRecord[]
             applyWorkspaceRecords(records)
           } catch (error) {
-            if ((error as any)?.code === WORKSPACE_EXISTS_ERROR) {
-              throw error
-            }
             console.error('[store] Failed to create workspace', error)
             throw error
           }
         } else {
           const now = Date.now()
-          const records = [...snapshotWorkspaces(), { name: trimmed, createdAt: now, updatedAt: now }]
+          record = {
+            id: generateWorkspaceId(),
+            name: trimmed,
+            createdAt: now,
+            updatedAt: now,
+          }
+          const records = [...snapshotWorkspaces(), record]
           applyWorkspaceRecords(records)
         }
 
-        yield storeWithActions.loadFromEventStore(trimmed)
+        yield storeWithActions.loadFromEventStore(record.id)
+        return record
       }),
       renameCurrentWorkspace: flow(function* (nextName: string) {
         const trimmed = nextName.trim()
-        const currentName = self.currentWorkspace
-        if (!currentName) {
+        const currentId = self.currentWorkspace
+        const currentRecord = self.currentWorkspaceRecord
+        if (!currentId || !currentRecord) {
           return
         }
 
@@ -485,46 +500,42 @@ export const RootStore = types
           throw error
         }
 
-        if (trimmed === currentName) {
+        if (trimmed === currentRecord.name) {
           return
-        }
-
-        if (self.workspaces.some(workspace => workspace.name === trimmed)) {
-          const error = new Error(`Workspace "${trimmed}" already exists`)
-          ;(error as any).code = WORKSPACE_EXISTS_ERROR
-          throw error
         }
 
         if (isEventStoreAvailable()) {
           try {
-            yield renameWorkspaceRecord(currentName, trimmed)
+            const updated = (yield renameWorkspaceRecord(currentId, trimmed)) as WorkspaceRecord
+            yield appendEvent(currentId, {
+              type: 'workspace_renamed',
+              payload: { id: currentId, name: updated.name, updatedAt: updated.updatedAt },
+              timestamp: nextTimestamp(),
+            })
             const records = (yield listWorkspaces()) as WorkspaceRecord[]
             applyWorkspaceRecords(records)
           } catch (error) {
-            if ((error as any)?.code === WORKSPACE_EXISTS_ERROR) {
-              throw error
-            }
             console.error('[store] Failed to rename workspace', error)
             throw error
           }
         } else {
           const records = snapshotWorkspaces().map(record =>
-            record.name === currentName ? { ...record, name: trimmed, updatedAt: Date.now() } : record,
+            record.id === currentId ? { ...record, name: trimmed, updatedAt: Date.now() } : record,
           )
           applyWorkspaceRecords(records)
         }
 
-        yield storeWithActions.loadFromEventStore(trimmed)
+        yield storeWithActions.loadFromEventStore(currentId)
       }),
       deleteCurrentWorkspace: flow(function* () {
-        const currentName = self.currentWorkspace
-        if (!currentName) {
+        const currentId = self.currentWorkspace
+        if (!currentId) {
           return
         }
 
         if (isEventStoreAvailable()) {
           try {
-            yield deleteWorkspaceRecord(currentName)
+            yield deleteWorkspaceRecord(currentId)
           } catch (error) {
             console.error('[store] Failed to delete workspace', error)
             throw error
@@ -539,41 +550,56 @@ export const RootStore = types
 
           if (records.length === 0) {
             const welcomeTree = createWelcomeTree()
-            let defaultRecord: WorkspaceRecord | null = null
+            let fallbackRecord: WorkspaceRecord = {
+              id: DEFAULT_WORKSPACE_ID,
+              name: DEFAULT_WORKSPACE_NAME,
+              createdAt: welcomeTree[0]?.createdAt ?? Date.now(),
+              updatedAt: Date.now(),
+            }
+
             try {
-              defaultRecord = (yield createWorkspaceRecord(DEFAULT_WORKSPACE)) as WorkspaceRecord
+              fallbackRecord = (yield createWorkspaceRecord(DEFAULT_WORKSPACE_NAME)) as WorkspaceRecord
+              records = (yield listWorkspaces()) as WorkspaceRecord[]
             } catch (error) {
-              if ((error as any)?.code !== WORKSPACE_EXISTS_ERROR) {
-                console.error('[store] Failed to recreate default workspace', error)
-              }
+              console.error('[store] Failed to recreate default workspace', error)
+              records = [fallbackRecord]
             }
 
-            yield replaceEventStoreWithTree(DEFAULT_WORKSPACE, welcomeTree)
+            yield replaceEventStoreWithTree(fallbackRecord.id, welcomeTree)
 
-            if (!defaultRecord) {
-              defaultRecord = {
-                name: DEFAULT_WORKSPACE,
-                createdAt: welcomeTree[0]?.createdAt ?? Date.now(),
-                updatedAt: Date.now(),
-              }
+            if (records.length === 0) {
+              records = [fallbackRecord]
             }
-
-            records = [defaultRecord]
           }
 
           applyWorkspaceRecords(records)
-          const nextWorkspace = records[0]?.name ?? DEFAULT_WORKSPACE
-          yield storeWithActions.loadFromEventStore(nextWorkspace)
+          const nextWorkspaceId = records[0]?.id ?? null
+          if (nextWorkspaceId) {
+            yield storeWithActions.loadFromEventStore(nextWorkspaceId)
+          } else {
+            persistWorkspaceSelection(null)
+          }
         } else {
-          const remaining = snapshotWorkspaces().filter(record => record.name !== currentName)
-          if (remaining.length === 0) {
+          let records = snapshotWorkspaces().filter(record => record.id !== currentId)
+          if (records.length === 0) {
             const now = Date.now()
-            remaining.push({ name: DEFAULT_WORKSPACE, createdAt: now, updatedAt: now })
+            records = [
+              {
+                id: DEFAULT_WORKSPACE_ID,
+                name: DEFAULT_WORKSPACE_NAME,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ]
           }
 
-          applyWorkspaceRecords(remaining)
-          const nextWorkspace = remaining[0]?.name ?? DEFAULT_WORKSPACE
-          yield storeWithActions.loadFromEventStore(nextWorkspace)
+          applyWorkspaceRecords(records)
+          const nextWorkspaceId = records[0]?.id ?? null
+          if (nextWorkspaceId) {
+            yield storeWithActions.loadFromEventStore(nextWorkspaceId)
+          } else {
+            persistWorkspaceSelection(null)
+          }
         }
       }),
       deleteAllWorkspaces: flow(function* () {
@@ -588,26 +614,25 @@ export const RootStore = types
           const welcomeTree = createWelcomeTree()
 
           let defaultRecord: WorkspaceRecord = {
-            name: DEFAULT_WORKSPACE,
+            id: DEFAULT_WORKSPACE_ID,
+            name: DEFAULT_WORKSPACE_NAME,
             createdAt: welcomeTree[0]?.createdAt ?? Date.now(),
             updatedAt: Date.now(),
           }
 
           try {
-            defaultRecord = (yield createWorkspaceRecord(DEFAULT_WORKSPACE)) as WorkspaceRecord
+            defaultRecord = (yield createWorkspaceRecord(DEFAULT_WORKSPACE_NAME)) as WorkspaceRecord
           } catch (error) {
-            if ((error as any)?.code !== WORKSPACE_EXISTS_ERROR) {
-              console.error('[store] Failed to create default workspace after clearing', error)
-            }
+            console.error('[store] Failed to create default workspace after clearing', error)
           }
 
-          yield replaceEventStoreWithTree(DEFAULT_WORKSPACE, welcomeTree)
+          yield replaceEventStoreWithTree(defaultRecord.id, welcomeTree)
 
           let records: WorkspaceRecord[] = []
           try {
             records = (yield listWorkspaces()) as WorkspaceRecord[]
           } catch (error) {
-            console.error('[store] Failed to refresh workspace list', error)
+            records = [defaultRecord]
           }
 
           if (records.length === 0) {
@@ -615,11 +640,17 @@ export const RootStore = types
           }
 
           applyWorkspaceRecords(records)
-          yield storeWithActions.loadFromEventStore(DEFAULT_WORKSPACE)
+          yield storeWithActions.loadFromEventStore(defaultRecord.id)
         } else {
           const now = Date.now()
-          applyWorkspaceRecords([{ name: DEFAULT_WORKSPACE, createdAt: now, updatedAt: now }])
-          yield storeWithActions.loadFromEventStore(DEFAULT_WORKSPACE)
+          const defaultRecord: WorkspaceRecord = {
+            id: DEFAULT_WORKSPACE_ID,
+            name: DEFAULT_WORKSPACE_NAME,
+            createdAt: now,
+            updatedAt: now,
+          }
+          applyWorkspaceRecords([defaultRecord])
+          yield storeWithActions.loadFromEventStore(defaultRecord.id)
         }
       }),
       setSearchQuery(query: string) {
@@ -765,7 +796,7 @@ export const RootStore = types
         if (!context) return null
 
         const newBullet = Bullet.create({
-          id: nanoid(),
+          id: generateBulletId(),
           content: '',
           context: '',
           children: [],
@@ -899,29 +930,36 @@ export const RootStore = types
 
         storeWithActions.saveToHistory()
       },
-      loadFromEventStore: flow(function* (workspaceName?: string) {
+      loadFromEventStore: flow(function* (workspaceId?: string) {
         if (typeof window === 'undefined') return
 
-        const targetWorkspace =
-          workspaceName?.trim() || self.currentWorkspace || (self.workspaces[0]?.name ?? DEFAULT_WORKSPACE)
+        const resolvedWorkspaceId = workspaceId?.trim() || self.currentWorkspace || self.workspaces[0]?.id || null
 
-        persistWorkspaceSelection(targetWorkspace)
+        if (!resolvedWorkspaceId) {
+          persistWorkspaceSelection(null)
+          self.bullets.clear()
+          self.history.clear()
+          self.historyIndex = -1
+          return
+        }
+
+        persistWorkspaceSelection(resolvedWorkspaceId)
 
         let persistedBullets: PersistedBullet[] = []
 
         if (isEventStoreAvailable()) {
           try {
-            const events = (yield getAllEvents(targetWorkspace)) as EventRecord[]
+            const events = (yield getAllEvents(resolvedWorkspaceId)) as EventRecord[]
             if (events.length > 0) {
               persistedBullets = replayEvents(events)
             } else {
               persistedBullets = createWelcomeTree()
-              yield replaceEventStoreWithTree(targetWorkspace, persistedBullets)
+              yield replaceEventStoreWithTree(resolvedWorkspaceId, persistedBullets)
             }
           } catch (error) {
             console.error('Failed to load events from IndexedDB', error)
             persistedBullets = createWelcomeTree()
-            yield replaceEventStoreWithTree(targetWorkspace, persistedBullets)
+            yield replaceEventStoreWithTree(resolvedWorkspaceId, persistedBullets)
           }
         } else {
           persistedBullets = createWelcomeTree()
@@ -950,7 +988,7 @@ export const RootStore = types
         const data = {
           bullets: getSnapshot(self.bullets),
           zoomedBulletId: self.zoomedBulletId,
-          workspace: self.currentWorkspace,
+          workspaceId: self.currentWorkspace,
           exportedAt: new Date().toISOString(),
         }
         return JSON.stringify(data, null, 2)
@@ -974,8 +1012,8 @@ export const RootStore = types
           storeWithActions.saveToHistory()
 
           runWithoutRecordingAsync(async () => {
-            const workspace = self.currentWorkspace || DEFAULT_WORKSPACE
-            await replaceEventStoreWithTree(workspace, normalized)
+            const workspaceId = self.currentWorkspace || self.workspaces[0]?.id || DEFAULT_WORKSPACE_ID
+            await replaceEventStoreWithTree(workspaceId, normalized)
           }).catch(error => {
             console.error('Failed to persist imported data to IndexedDB', error)
           })
@@ -999,8 +1037,8 @@ export const RootStore = types
         storeWithActions.saveToHistory()
 
         runWithoutRecordingAsync(async () => {
-          const workspace = self.currentWorkspace || DEFAULT_WORKSPACE
-          await replaceEventStoreWithTree(workspace, welcomeTree)
+          const workspaceId = self.currentWorkspace || self.workspaces[0]?.id || DEFAULT_WORKSPACE_ID
+          await replaceEventStoreWithTree(workspaceId, welcomeTree)
         }).catch(error => {
           console.error('Failed to reset IndexedDB event store', error)
         })
@@ -1063,7 +1101,7 @@ export const RootStore = types
       },
       createEmptyBullet(parent: Instance<typeof Bullet> | null, options?: { skipHistory?: boolean }) {
         const newBullet = Bullet.create({
-          id: nanoid(),
+          id: generateBulletId(),
           content: '',
           context: '',
           children: [],
@@ -1129,7 +1167,7 @@ export function initializeStore() {
       historyIndex: -1,
       searchQuery: '',
       workspaces: [],
-      currentWorkspace: DEFAULT_WORKSPACE,
+      currentWorkspace: null,
       isBootstrapped: false,
     })
   }

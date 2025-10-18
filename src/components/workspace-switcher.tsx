@@ -20,12 +20,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { WORKSPACE_EXISTS_ERROR } from '@/lib/event-store'
 import { useStore } from '@/lib/store-context'
 import { cn } from '@/lib/utils'
 import { Check, ChevronsUpDown, Layers, Loader2, Pencil, Plus } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 type DialogMode = 'create' | 'rename'
 
@@ -45,6 +45,7 @@ const INITIAL_DIALOG_STATE: DialogState = {
 
 export const WorkspaceSwitcher = observer(() => {
   const store = useStore()
+  const navigate = useNavigate()
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [dialogState, setDialogState] = useState<DialogState>(INITIAL_DIALOG_STATE)
@@ -56,7 +57,8 @@ export const WorkspaceSwitcher = observer(() => {
     return window.matchMedia('(max-width: 640px)').matches
   })
 
-  const currentWorkspace = store.currentWorkspace ?? ''
+  const currentWorkspaceId = store.currentWorkspace ?? ''
+  const currentWorkspaceRecord = store.currentWorkspaceRecord
   const workspaces = store.workspaces
   const isDialogOpen = dialogState.mode !== null
 
@@ -96,16 +98,21 @@ export const WorkspaceSwitcher = observer(() => {
   const handleOpenDialog = (mode: DialogMode) => {
     setPopoverOpen(false)
     setMobileMenuOpen(false)
-    setDialogState({ mode, error: null, loading: false, value: mode === 'rename' ? currentWorkspace : '' })
+    setDialogState({
+      mode,
+      error: null,
+      loading: false,
+      value: mode === 'rename' ? currentWorkspaceRecord?.name ?? '' : '',
+    })
   }
 
-  const handleSelectWorkspace = (workspaceName: string) => {
+  const handleSelectWorkspace = (workspaceId: string) => {
     setPopoverOpen(false)
     setMobileMenuOpen(false)
-    if (!workspaceName || workspaceName === currentWorkspace) {
+    if (!workspaceId || workspaceId === currentWorkspaceId) {
       return
     }
-    void store.selectWorkspace(workspaceName)
+    navigate(`/${workspaceId}`)
   }
 
   const handleDialogSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -124,7 +131,8 @@ export const WorkspaceSwitcher = observer(() => {
 
     try {
       if (dialogState.mode === 'create') {
-        await store.createWorkspace(trimmed)
+        const record = await store.createWorkspace(trimmed)
+        navigate(`/${record.id}`)
       } else {
         await store.renameCurrentWorkspace(trimmed)
       }
@@ -132,15 +140,17 @@ export const WorkspaceSwitcher = observer(() => {
     } catch (error) {
       const code = (error as { code?: string } | undefined)?.code
       const message =
-        code === WORKSPACE_EXISTS_ERROR
-          ? 'A workspace with this name already exists.'
+        code === 'WORKSPACE_NAME_REQUIRED'
+          ? 'Please enter a workspace name.'
           : 'Something went wrong. Please try again.'
       setDialogState(prev => ({ ...prev, loading: false, error: message }))
     }
   }
 
   const isLoading = !store.isBootstrapped && workspaces.length === 0
-  const currentLabel = isLoading ? 'Loading workspaces...' : currentWorkspace || 'Select workspace'
+  const currentLabel = isLoading
+    ? 'Loading workspaces...'
+    : currentWorkspaceRecord?.name || 'Select workspace'
   const commandList = (
     <Command className="h-full">
       <CommandInput placeholder="Search workspaces" autoFocus={!isMobile} />
@@ -148,12 +158,14 @@ export const WorkspaceSwitcher = observer(() => {
         <CommandEmpty>No workspace found.</CommandEmpty>
         <CommandGroup heading="Workspaces">
           {workspaces.map(workspace => {
-            const name = workspace.name
-            const isActive = name === currentWorkspace
+            const isActive = workspace.id === currentWorkspaceId
             return (
-              <CommandItem key={name} value={name} onSelect={handleSelectWorkspace}>
+              <CommandItem
+                key={workspace.id}
+                value={`${workspace.name} ${workspace.id}`}
+                onSelect={() => handleSelectWorkspace(workspace.id)}>
                 <Check className={cn('mr-2 size-4', isActive ? 'opacity-100' : 'opacity-0')} />
-                <span className="truncate">{name}</span>
+                <span className="truncate">{workspace.name}</span>
               </CommandItem>
             )
           })}
@@ -168,7 +180,7 @@ export const WorkspaceSwitcher = observer(() => {
             value="rename-workspace"
             onSelect={() => handleOpenDialog('rename')}
             className="gap-2"
-            disabled={!currentWorkspace}>
+            disabled={!currentWorkspaceRecord}>
             <Pencil className="size-4" />
             Rename current workspace
           </CommandItem>

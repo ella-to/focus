@@ -142,7 +142,10 @@ export const BulletItem = observer(
 
       e.stopPropagation()
       store.zoomToBullet(bullet.id)
-      navigate(`/${bullet.id}`)
+      const workspaceId = store.currentWorkspace
+      if (workspaceId) {
+        navigate(`/${workspaceId}/${bullet.id}`)
+      }
     }
 
     const handleToggleCollapse = (e: React.MouseEvent) => {

@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from 'react'
 
 export const DataControls = observer(({ onToggleShortcuts }: { onToggleShortcuts: () => void }) => {
   const store = useStore()
+  const currentWorkspaceRecord = store.currentWorkspaceRecord
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
@@ -154,7 +155,10 @@ export const DataControls = observer(({ onToggleShortcuts }: { onToggleShortcuts
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-            Current workspace: <span className="font-medium text-foreground">{store.currentWorkspace}</span>
+            Current workspace:{' '}
+            <span className="font-medium text-foreground">
+              {currentWorkspaceRecord?.name || 'No workspace selected'}
+            </span>
           </div>
           <DialogFooter className="!flex-col gap-3 sm:!flex-row sm:items-center sm:!justify-between">
             <Button variant="outline" onClick={() => setResetDialogOpen(false)} className="w-full sm:w-auto">

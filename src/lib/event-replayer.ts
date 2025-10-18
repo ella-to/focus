@@ -1,4 +1,4 @@
-import type { EventRecord, EventType, EventPayloadMap, ParentId } from './event-store'
+import type { EventPayloadMap, EventRecord, EventType, ParentId } from './event-store'
 
 export interface PersistedBullet {
   id: string
@@ -93,12 +93,7 @@ function applyBulletDeleted(state: ReplayState, payload: EventPayloadMap['bullet
   }
 }
 
-function applyMove(
-  state: ReplayState,
-  id: string,
-  toParentId: ParentId,
-  toIndex: number,
-) {
+function applyMove(state: ReplayState, id: string, toParentId: ParentId, toIndex: number) {
   const node = removeFromParent(state, id)
   if (!node) {
     return
@@ -139,6 +134,18 @@ function applyBulletCollapsedUpdated(state: ReplayState, payload: EventPayloadMa
   }
 }
 
+function applyWorkspaceCreated(_state: ReplayState, _payload: EventPayloadMap['workspace_created']) {
+  /* no-op */
+}
+
+function applyWorkspaceRenamed(_state: ReplayState, _payload: EventPayloadMap['workspace_renamed']) {
+  /* no-op */
+}
+
+function applyWorkspaceDeleted(_state: ReplayState, _payload: EventPayloadMap['workspace_deleted']) {
+  /* no-op */
+}
+
 const handlers: {
   [K in EventType]: (state: ReplayState, payload: EventPayloadMap[K]) => void
 } = {
@@ -150,6 +157,9 @@ const handlers: {
   bullet_content_updated: applyBulletContentUpdated,
   bullet_context_updated: applyBulletContextUpdated,
   bullet_collapsed_updated: applyBulletCollapsedUpdated,
+  workspace_created: applyWorkspaceCreated,
+  workspace_renamed: applyWorkspaceRenamed,
+  workspace_deleted: applyWorkspaceDeleted,
 }
 
 export function replayEvents(events: EventRecord[]): PersistedBullet[] {
@@ -169,4 +179,3 @@ export function replayEvents(events: EventRecord[]): PersistedBullet[] {
 
   return state.root
 }
-

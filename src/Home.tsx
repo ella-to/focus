@@ -19,11 +19,12 @@ export function Home() {
 
 const HomeContent = observer(() => {
   const store = useStore()
-  const { bulletId } = useParams<{ bulletId?: string }>()
+  const { workspaceId, bulletId } = useParams<{ workspaceId?: string; bulletId?: string }>()
   const navigate = useNavigate()
   const [showShortcuts, setShowShortcuts] = useState(true)
   const lastSyncedIdRef = useRef<string | null>(null)
 
+  const routeWorkspaceId = workspaceId ?? null
   const routeBulletId = bulletId ?? null
 
   useEffect(() => {
@@ -43,29 +44,94 @@ const HomeContent = observer(() => {
   }, [])
 
   useEffect(() => {
-    if (routeBulletId !== lastSyncedIdRef.current) {
-      store.setZoomedBulletId(routeBulletId)
-      lastSyncedIdRef.current = routeBulletId
+    let cancelled = false
+
+    const syncWorkspace = async () => {
+      if (!store.isBootstrapped) {
+        const loadedId = (await store.bootstrap(routeWorkspaceId ?? undefined)) ?? store.currentWorkspace
+        if (cancelled) return
+
+        const activeId = loadedId || store.currentWorkspace || store.workspaces[0]?.id || null
+        if (!routeWorkspaceId || (activeId && routeWorkspaceId !== activeId)) {
+          if (activeId) {
+            const includeRouteBullet = routeWorkspaceId === activeId && !!routeBulletId
+            const nextPath = includeRouteBullet ? `/${activeId}/${routeBulletId}` : `/${activeId}`
+            navigate(nextPath, { replace: true })
+          }
+        }
+        return
+      }
+
+      if (!routeWorkspaceId) {
+        const fallbackId = store.currentWorkspace || store.workspaces[0]?.id || null
+        if (fallbackId) {
+          const nextPath = `/${fallbackId}`
+          navigate(nextPath, { replace: true })
+        }
+        return
+      }
+
+      if (routeWorkspaceId !== store.currentWorkspace) {
+        const exists = store.workspaces.some(workspace => workspace.id === routeWorkspaceId)
+        if (exists) {
+          await store.selectWorkspace(routeWorkspaceId)
+        } else if (store.workspaces.length > 0) {
+          const fallbackId = store.workspaces[0].id
+          const nextPath = `/${fallbackId}`
+          navigate(nextPath, { replace: true })
+        }
+      }
     }
-  }, [routeBulletId, store])
+
+    void syncWorkspace()
+
+    return () => {
+      cancelled = true
+    }
+  }, [store, store.isBootstrapped, store.workspaces, store.currentWorkspace, routeWorkspaceId, routeBulletId, navigate])
 
   useEffect(() => {
+    if (!store.isBootstrapped) {
+      return
+    }
+
+    if (!routeWorkspaceId || routeWorkspaceId !== store.currentWorkspace) {
+      return
+    }
+
+    const normalizedBulletId = routeBulletId ?? null
+    if (normalizedBulletId === lastSyncedIdRef.current) {
+      return
+    }
+
+    store.setZoomedBulletId(normalizedBulletId)
+    lastSyncedIdRef.current = normalizedBulletId
+  }, [store, store.isBootstrapped, store.currentWorkspace, routeWorkspaceId, routeBulletId])
+
+  useEffect(() => {
+    if (!store.isBootstrapped) {
+      return
+    }
+
+    const currentWorkspace = store.currentWorkspace
+    if (!currentWorkspace || currentWorkspace !== routeWorkspaceId) {
+      return
+    }
+
     const currentZoomId = store.zoomedBulletId ?? null
-    if (currentZoomId === lastSyncedIdRef.current) {
+    if (currentZoomId === routeBulletId) {
+      lastSyncedIdRef.current = currentZoomId
       return
     }
 
     lastSyncedIdRef.current = currentZoomId
+    const nextPath = currentZoomId ? `/${currentWorkspace}/${currentZoomId}` : `/${currentWorkspace}`
+    navigate(nextPath, { replace: true })
+  }, [store.isBootstrapped, store.currentWorkspace, store.zoomedBulletId, routeWorkspaceId, routeBulletId, navigate])
 
-    if (currentZoomId) {
-      navigate(`/${currentZoomId}`, { replace: true })
-    } else {
-      navigate('/', { replace: true })
-    }
-  }, [store.zoomedBulletId, navigate])
-
-  const isStoreReady = store.historyIndex >= 0
-  const bulletExists = routeBulletId ? store.findBulletById(routeBulletId) : null
+  const isStoreReady = store.isBootstrapped && store.currentWorkspace === routeWorkspaceId && store.historyIndex >= 0
+  const bulletExists =
+    isStoreReady && routeBulletId ? store.findBulletById(routeBulletId) : null
   const showNotFound = isStoreReady && routeBulletId !== null && !bulletExists
 
   const handleReturnHome = () => {

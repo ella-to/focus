@@ -1,9 +1,14 @@
+import {
+  DEFAULT_WORKSPACE_ID,
+  DEFAULT_WORKSPACE_NAME,
+  ensureWorkspaceId,
+  generateWorkspaceId,
+} from './id'
+
 const DB_NAME = 'focus-event-store'
-const DB_VERSION = 2
+const DB_VERSION = 4
 const STORE_NAME = 'events'
 const WORKSPACE_STORE = 'workspaces'
-export const DEFAULT_WORKSPACE = 'default'
-export const WORKSPACE_EXISTS_ERROR = 'WORKSPACE_EXISTS'
 export const WORKSPACE_NOT_FOUND_ERROR = 'WORKSPACE_NOT_FOUND'
 
 export type ParentId = string | null
@@ -17,6 +22,9 @@ export type EventType =
   | 'bullet_content_updated'
   | 'bullet_context_updated'
   | 'bullet_collapsed_updated'
+  | 'workspace_created'
+  | 'workspace_renamed'
+  | 'workspace_deleted'
 
 export interface EventPayloadMap {
   bullet_created: {
@@ -65,6 +73,20 @@ export interface EventPayloadMap {
     id: string
     collapsed: boolean
   }
+  workspace_created: {
+    id: string
+    name: string
+    createdAt: number
+  }
+  workspace_renamed: {
+    id: string
+    name: string
+    updatedAt: number
+  }
+  workspace_deleted: {
+    id: string
+    deletedAt: number
+  }
 }
 
 export type EventRecord<T extends EventType = EventType> = {
@@ -72,10 +94,11 @@ export type EventRecord<T extends EventType = EventType> = {
   type: T
   payload: EventPayloadMap[T]
   timestamp: number
-  workspace: string
+  workspaceId: string
 }
 
 export interface WorkspaceRecord {
+  id: string
   name: string
   createdAt: number
   updatedAt: number
@@ -85,6 +108,151 @@ let dbPromise: Promise<IDBDatabase> | null = null
 
 function isIndexedDbAvailable(): boolean {
   return typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined'
+}
+
+async function upgradeDatabase(db: IDBDatabase, transaction: IDBTransaction, oldVersion: number) {
+  let eventsStore: IDBObjectStore
+
+  if (!db.objectStoreNames.contains(STORE_NAME)) {
+    eventsStore = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true })
+  } else {
+    eventsStore = transaction.objectStore(STORE_NAME)
+  }
+
+  if (!eventsStore.indexNames.contains('workspaceId')) {
+    eventsStore.createIndex('workspaceId', 'workspaceId', { unique: false })
+  }
+
+  let workspaceStore!: IDBObjectStore
+  const shouldCreateStore = !db.objectStoreNames.contains(WORKSPACE_STORE)
+  let existingWorkspaces: WorkspaceRecord[] = []
+  let recreateWorkspaceStore = shouldCreateStore
+  const idUpdates = new Map<string, string>()
+
+  if (!shouldCreateStore) {
+    const legacyStore = transaction.objectStore(WORKSPACE_STORE)
+    const keyPath = legacyStore.keyPath
+    const records = ((await promisifyRequest(legacyStore.getAll())) as any[]) ?? []
+
+    if (keyPath !== 'id') {
+      recreateWorkspaceStore = true
+      existingWorkspaces = records.map(record => {
+        const rawName = record?.name ? String(record.name) : DEFAULT_WORKSPACE_NAME
+        const createdAt = typeof record?.createdAt === 'number' ? record.createdAt : Date.now()
+        const updatedAt = typeof record?.updatedAt === 'number' ? record.updatedAt : createdAt
+        const normalizedId = ensureWorkspaceId(rawName)
+        const previousId = record?.name ? String(record.name) : ''
+        if (previousId && normalizedId !== previousId) {
+          idUpdates.set(previousId, normalizedId)
+        }
+        return {
+          id: normalizedId,
+          name: rawName,
+          createdAt,
+          updatedAt,
+        }
+      })
+    } else {
+      existingWorkspaces = records.map(record => {
+  const rawId = record?.id ? String(record.id) : 'default'
+        const normalizedId = ensureWorkspaceId(rawId)
+        if (normalizedId !== rawId) {
+          idUpdates.set(rawId, normalizedId)
+        }
+        const rawName = record?.name ? String(record.name) : DEFAULT_WORKSPACE_NAME
+        const createdAt = typeof record?.createdAt === 'number' ? record.createdAt : Date.now()
+        const updatedAt = typeof record?.updatedAt === 'number' ? record.updatedAt : createdAt
+        return {
+          id: normalizedId,
+          name: rawName,
+          createdAt,
+          updatedAt,
+        }
+      })
+      workspaceStore = legacyStore
+    }
+  }
+
+  if (recreateWorkspaceStore) {
+    if (db.objectStoreNames.contains(WORKSPACE_STORE)) {
+      db.deleteObjectStore(WORKSPACE_STORE)
+    }
+    workspaceStore = db.createObjectStore(WORKSPACE_STORE, { keyPath: 'id' })
+  } else if (!workspaceStore) {
+    workspaceStore = transaction.objectStore(WORKSPACE_STORE)
+  }
+
+  const workspaceIds = new Set(existingWorkspaces.map(workspace => workspace.id))
+
+  if (existingWorkspaces.length === 0) {
+    const now = Date.now()
+    const defaultWorkspace: WorkspaceRecord = {
+      id: DEFAULT_WORKSPACE_ID,
+      name: DEFAULT_WORKSPACE_NAME,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await promisifyRequest(workspaceStore.put(defaultWorkspace))
+    existingWorkspaces.push(defaultWorkspace)
+    workspaceIds.add(defaultWorkspace.id)
+  } else {
+    if (!recreateWorkspaceStore) {
+      for (const [oldId, newId] of idUpdates) {
+        if (oldId && oldId !== newId) {
+          try {
+            await promisifyRequest(workspaceStore.delete(oldId))
+          } catch {
+            // ignore missing records
+          }
+        }
+      }
+    }
+
+    for (const record of existingWorkspaces) {
+      workspaceIds.add(record.id)
+      await promisifyRequest(workspaceStore.put(record))
+    }
+  }
+
+  if (oldVersion < 3) {
+    await iterateCursor(eventsStore.openCursor(), async cursor => {
+      const value = cursor.value as Record<string, unknown>
+      if (!value.workspaceId) {
+        const legacyIdSource = typeof value.workspace === 'string' ? String(value.workspace) : 'default'
+        const workspaceId = ensureWorkspaceId(legacyIdSource)
+        const workspaceName = typeof value.workspace === 'string' ? String(value.workspace) : DEFAULT_WORKSPACE_NAME
+
+        if (!workspaceIds.has(workspaceId)) {
+          const now = Date.now()
+          const record: WorkspaceRecord = {
+            id: workspaceId,
+            name: workspaceName,
+            createdAt: now,
+            updatedAt: now,
+          }
+          await promisifyRequest(workspaceStore.put(record))
+          existingWorkspaces.push(record)
+          workspaceIds.add(workspaceId)
+        }
+
+        value.workspaceId = workspaceId
+        delete value.workspace
+        cursor.update(value)
+      }
+    })
+  }
+
+  if (oldVersion < 4 && idUpdates.size > 0) {
+    await iterateCursor(eventsStore.openCursor(), async cursor => {
+      const value = cursor.value as Record<string, unknown>
+      const currentId = typeof value.workspaceId === 'string' ? value.workspaceId : ''
+      const updatedId = idUpdates.get(currentId)
+      if (updatedId) {
+        value.workspaceId = updatedId
+        cursor.update(value)
+      }
+    })
+  }
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -98,54 +266,19 @@ function openDatabase(): Promise<IDBDatabase> {
 
       request.onupgradeneeded = event => {
         const db = request.result
-        const txn = request.transaction
-        if (!txn) {
+        const transaction = request.transaction
+        if (!transaction) {
           return
         }
 
-        const oldVersion = event.oldVersion
-        let eventsStore: IDBObjectStore
-
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          eventsStore = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true })
-        } else {
-          eventsStore = txn.objectStore(STORE_NAME)
-        }
-
-        if (oldVersion < 2) {
-          if (!eventsStore.indexNames.contains('workspace')) {
-            eventsStore.createIndex('workspace', 'workspace', { unique: false })
+        upgradeDatabase(db, transaction, event.oldVersion).catch(error => {
+          console.error('[event-store] Failed to upgrade database', error)
+          try {
+            transaction.abort()
+          } catch (abortError) {
+            console.error('[event-store] Failed to abort transaction after upgrade error', abortError)
           }
-
-          let workspaceStore: IDBObjectStore
-          if (!db.objectStoreNames.contains(WORKSPACE_STORE)) {
-            workspaceStore = db.createObjectStore(WORKSPACE_STORE, { keyPath: 'name' })
-          } else {
-            workspaceStore = txn.objectStore(WORKSPACE_STORE)
-          }
-
-          const defaultWorkspace: WorkspaceRecord = {
-            name: DEFAULT_WORKSPACE,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          }
-
-          workspaceStore.put(defaultWorkspace)
-
-          const cursorRequest = eventsStore.openCursor()
-          cursorRequest.onsuccess = () => {
-            const cursor = cursorRequest.result
-            if (!cursor) {
-              return
-            }
-            const value = cursor.value as EventRecord
-            if (!value.workspace) {
-              value.workspace = DEFAULT_WORKSPACE
-              cursor.update(value)
-            }
-            cursor.continue()
-          }
-        }
+        })
       }
 
       request.onsuccess = () => resolve(request.result)
@@ -231,8 +364,8 @@ export function isEventStoreAvailable(): boolean {
 }
 
 export async function appendEvent<T extends EventType>(
-  workspace: string,
-  record: Omit<EventRecord<T>, 'id' | 'workspace'>,
+  workspaceId: string,
+  record: Omit<EventRecord<T>, 'id' | 'workspaceId'>,
 ): Promise<number | undefined> {
   if (!isIndexedDbAvailable()) {
     console.warn('[event-store] IndexedDB not available; event not persisted.')
@@ -240,31 +373,31 @@ export async function appendEvent<T extends EventType>(
   }
 
   return withStore('readwrite', async store => {
-    const request = store.add({ ...record, workspace })
+    const request = store.add({ ...record, workspaceId })
     const id = await promisifyRequest(request)
     return typeof id === 'number' ? id : undefined
   })
 }
 
-export async function getAllEvents(workspace?: string): Promise<EventRecord[]> {
+export async function getAllEvents(workspaceId?: string): Promise<EventRecord[]> {
   if (!isIndexedDbAvailable()) {
     return []
   }
 
   return withStore('readonly', async store => {
-    if (workspace) {
-      let events: EventRecord[] = []
-      if (store.indexNames.contains('workspace')) {
-        const index = store.index('workspace')
-        const request = index.getAll(IDBKeyRange.only(workspace))
-        events = ((await promisifyRequest(request)) as EventRecord[]) ?? []
+    if (workspaceId) {
+      if (!store.indexNames.contains('workspaceId')) {
+        return []
       }
-      return events
+      const index = store.index('workspaceId')
+      const request = index.getAll(IDBKeyRange.only(workspaceId))
+      const events = await promisifyRequest(request)
+      return ((events as EventRecord[]) ?? []).sort((a, b) => a.timestamp - b.timestamp)
     }
 
     const request = store.getAll()
     const events = await promisifyRequest(request)
-    return (events as EventRecord[]) ?? []
+    return ((events as EventRecord[]) ?? []).sort((a, b) => a.timestamp - b.timestamp)
   })
 }
 
@@ -279,8 +412,8 @@ export async function clearEvents(): Promise<void> {
 }
 
 export async function bulkInsertEvents(
-  workspace: string,
-  events: Omit<EventRecord, 'id' | 'workspace'>[],
+  workspaceId: string,
+  events: Omit<EventRecord, 'id' | 'workspaceId'>[],
 ): Promise<void> {
   if (!isIndexedDbAvailable()) {
     return
@@ -288,23 +421,23 @@ export async function bulkInsertEvents(
 
   return withStore('readwrite', async store => {
     for (const event of events) {
-      await promisifyRequest(store.add({ ...event, workspace }))
+      await promisifyRequest(store.add({ ...event, workspaceId }))
     }
   })
 }
 
-export async function clearEventsForWorkspace(workspace: string): Promise<void> {
+export async function clearEventsForWorkspace(workspaceId: string): Promise<void> {
   if (!isIndexedDbAvailable()) {
     return
   }
 
   await withStore('readwrite', async store => {
-    if (!store.indexNames.contains('workspace')) {
+    if (!store.indexNames.contains('workspaceId')) {
       return
     }
 
-    const index = store.index('workspace')
-    const request = index.openCursor(IDBKeyRange.only(workspace))
+    const index = store.index('workspaceId')
+    const request = index.openCursor(IDBKeyRange.only(workspaceId))
 
     await iterateCursor(request, cursor => {
       return promisifyRequest(cursor.delete()).then(() => undefined)
@@ -313,27 +446,28 @@ export async function clearEventsForWorkspace(workspace: string): Promise<void> 
 }
 
 export async function replaceWorkspaceEvents(
-  workspace: string,
-  events: Omit<EventRecord, 'id' | 'workspace'>[],
+  workspaceId: string,
+  events: Omit<EventRecord, 'id' | 'workspaceId'>[],
 ): Promise<void> {
   if (!isIndexedDbAvailable()) {
     return
   }
 
-  await clearEventsForWorkspace(workspace)
+  await clearEventsForWorkspace(workspaceId)
 
   if (events.length === 0) {
     return
   }
 
-  await bulkInsertEvents(workspace, events)
+  await bulkInsertEvents(workspaceId, events)
 }
 
 export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
   if (!isIndexedDbAvailable()) {
     return [
       {
-        name: DEFAULT_WORKSPACE,
+        id: DEFAULT_WORKSPACE_ID,
+        name: DEFAULT_WORKSPACE_NAME,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       },
@@ -344,27 +478,17 @@ export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
     const store = transaction.objectStore(WORKSPACE_STORE)
     const request = store.getAll()
     const records = await promisifyRequest(request)
-    return (records as WorkspaceRecord[]) ?? []
+    const items = (records as WorkspaceRecord[] | undefined) ?? []
+    return items.map(record => {
+      const id = record?.id ? ensureWorkspaceId(String(record.id)) : DEFAULT_WORKSPACE_ID
+      const name = record?.name ? String(record.name) : DEFAULT_WORKSPACE_NAME
+      const createdAt = typeof record?.createdAt === 'number' ? record.createdAt : Date.now()
+      const updatedAt = typeof record?.updatedAt === 'number' ? record.updatedAt : createdAt
+      return { id, name, createdAt, updatedAt }
+    })
   })
-
-  if (workspaces.length === 0) {
-    return []
-  }
 
   return [...workspaces].sort((a, b) => a.createdAt - b.createdAt)
-}
-
-export async function workspaceExists(name: string): Promise<boolean> {
-  if (!isIndexedDbAvailable()) {
-    return name === DEFAULT_WORKSPACE
-  }
-
-  return withTransaction('readonly', [WORKSPACE_STORE], async transaction => {
-    const store = transaction.objectStore(WORKSPACE_STORE)
-    const request = store.get(name)
-    const record = await promisifyRequest(request)
-    return Boolean(record)
-  })
 }
 
 export async function createWorkspaceRecord(name: string): Promise<WorkspaceRecord> {
@@ -375,6 +499,7 @@ export async function createWorkspaceRecord(name: string): Promise<WorkspaceReco
 
   const now = Date.now()
   const record: WorkspaceRecord = {
+    id: generateWorkspaceId(),
     name: trimmed,
     createdAt: now,
     updatedAt: now,
@@ -386,20 +511,13 @@ export async function createWorkspaceRecord(name: string): Promise<WorkspaceReco
 
   await withTransaction('readwrite', [WORKSPACE_STORE], async transaction => {
     const store = transaction.objectStore(WORKSPACE_STORE)
-    const existing = await promisifyRequest(store.get(trimmed))
-    if (existing) {
-      const error = new Error(`Workspace "${trimmed}" already exists`)
-      ;(error as any).code = WORKSPACE_EXISTS_ERROR
-      throw error
-    }
-
     await promisifyRequest(store.add(record))
   })
 
   return record
 }
 
-export async function deleteWorkspaceRecord(name: string): Promise<void> {
+export async function deleteWorkspaceRecord(id: string): Promise<void> {
   if (!isIndexedDbAvailable()) {
     return
   }
@@ -408,21 +526,21 @@ export async function deleteWorkspaceRecord(name: string): Promise<void> {
     const workspaceStore = transaction.objectStore(WORKSPACE_STORE)
     const eventsStore = transaction.objectStore(STORE_NAME)
 
-    const existing = await promisifyRequest(workspaceStore.get(name))
+    const existing = await promisifyRequest(workspaceStore.get(id))
     if (!existing) {
-      const error = new Error(`Workspace "${name}" not found`)
+      const error = new Error(`Workspace "${id}" not found`)
       ;(error as any).code = WORKSPACE_NOT_FOUND_ERROR
       throw error
     }
 
-    await promisifyRequest(workspaceStore.delete(name))
+    await promisifyRequest(workspaceStore.delete(id))
 
-    if (!eventsStore.indexNames.contains('workspace')) {
+    if (!eventsStore.indexNames.contains('workspaceId')) {
       return
     }
 
-    const index = eventsStore.index('workspace')
-    const request = index.openCursor(IDBKeyRange.only(name))
+    const index = eventsStore.index('workspaceId')
+    const request = index.openCursor(IDBKeyRange.only(id))
 
     await iterateCursor(request, cursor => {
       return promisifyRequest(cursor.delete()).then(() => undefined)
@@ -430,55 +548,39 @@ export async function deleteWorkspaceRecord(name: string): Promise<void> {
   })
 }
 
-export async function renameWorkspaceRecord(oldName: string, newName: string): Promise<void> {
-  const trimmed = newName.trim()
+export async function renameWorkspaceRecord(id: string, name: string): Promise<WorkspaceRecord> {
+  const trimmed = name.trim()
   if (!trimmed) {
     throw new Error('Workspace name is required')
   }
 
   if (!isIndexedDbAvailable()) {
-    return
+    return {
+      id,
+      name: trimmed,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
   }
 
-  await withTransaction('readwrite', [WORKSPACE_STORE, STORE_NAME], async transaction => {
+  return withTransaction('readwrite', [WORKSPACE_STORE], async transaction => {
     const workspaceStore = transaction.objectStore(WORKSPACE_STORE)
-    const eventsStore = transaction.objectStore(STORE_NAME)
 
-    const existing = await promisifyRequest(workspaceStore.get(oldName))
+    const existing = (await promisifyRequest(workspaceStore.get(id))) as WorkspaceRecord | undefined
     if (!existing) {
-      const error = new Error(`Workspace "${oldName}" not found`)
+      const error = new Error(`Workspace "${id}" not found`)
       ;(error as any).code = WORKSPACE_NOT_FOUND_ERROR
       throw error
     }
 
-    const duplicate = await promisifyRequest(workspaceStore.get(trimmed))
-    if (duplicate) {
-      const error = new Error(`Workspace "${trimmed}" already exists`)
-      ;(error as any).code = WORKSPACE_EXISTS_ERROR
-      throw error
+    const updated: WorkspaceRecord = {
+      ...existing,
+      name: trimmed,
+      updatedAt: Date.now(),
     }
 
-    await promisifyRequest(workspaceStore.delete(oldName))
-    await promisifyRequest(
-      workspaceStore.add({
-        ...existing,
-        name: trimmed,
-        updatedAt: Date.now(),
-      } satisfies WorkspaceRecord),
-    )
-
-    if (!eventsStore.indexNames.contains('workspace')) {
-      return
-    }
-
-    const index = eventsStore.index('workspace')
-    const request = index.openCursor(IDBKeyRange.only(oldName))
-
-    await iterateCursor(request, cursor => {
-      const value = cursor.value as EventRecord
-      value.workspace = trimmed
-      return promisifyRequest(cursor.update(value)).then(() => undefined)
-    })
+    await promisifyRequest(workspaceStore.put(updated))
+    return updated
   })
 }
 

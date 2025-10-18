@@ -7,7 +7,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
-        <Route path=":bulletId?" element={<Home />} />
+        <Route path=":workspaceId?/:bulletId?" element={<Home />} />
       </Route>
     </Routes>
   )

@@ -201,6 +201,7 @@ export const BulletList = observer(() => {
 
       const { bullet, parent, siblings } = context
       const bulletIndex = siblings.findIndex((b: any) => b.id === bullet.id)
+  const workspaceId = store.currentWorkspace
 
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') {
         e.preventDefault()
@@ -229,7 +230,9 @@ export const BulletList = observer(() => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         store.zoomToBullet(bullet.id)
-        navigate(`/${bullet.id}`)
+        if (workspaceId) {
+          navigate(`/${workspaceId}/${bullet.id}`)
+        }
         return
       }
 
@@ -239,10 +242,14 @@ export const BulletList = observer(() => {
         if (breadcrumbs.length > 1) {
           const parent = breadcrumbs[breadcrumbs.length - 2]
           store.zoomToBullet(parent.id)
-          navigate(`/${parent.id}`)
+          if (workspaceId) {
+            navigate(`/${workspaceId}/${parent.id}`)
+          }
         } else {
           store.zoomToBullet(null)
-          navigate('/')
+          if (workspaceId) {
+            navigate(`/${workspaceId}`)
+          }
         }
         return
       }

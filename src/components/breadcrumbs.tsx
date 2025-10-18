@@ -10,20 +10,25 @@ export const Breadcrumbs = observer(() => {
   if (!store.zoomedBulletId) return null
 
   const breadcrumbs = store.getBreadcrumbs(store.zoomedBulletId)
+  const currentWorkspaceId = store.currentWorkspace
 
   const handleBreadcrumbClick = (bulletId: string | null) => {
     store.zoomToBullet(bulletId)
+    if (!currentWorkspaceId) {
+      return
+    }
+
     if (bulletId) {
-      navigate(`/${bulletId}`)
+      navigate(`/${currentWorkspaceId}/${bulletId}`)
     } else {
-      navigate('/')
+      navigate(`/${currentWorkspaceId}`)
     }
   }
 
   return (
     <div className="flex items-center gap-2 px-6 py-3 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
       <button
-        onClick={() => handleBreadcrumbClick(null)}
+  onClick={() => handleBreadcrumbClick(null)}
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         aria-label="Go to home">
         <Home className="w-4 h-4" />
