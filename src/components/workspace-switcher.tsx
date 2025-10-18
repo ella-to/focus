@@ -22,12 +22,12 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useStore } from '@/lib/store-context'
 import { cn } from '@/lib/utils'
-import { Check, ChevronsUpDown, Layers, Loader2, Lock, Pencil, Plus, Unlock } from 'lucide-react'
+import { Check, ChevronsUpDown, Layers, Loader2, Lock, Pencil, Plus } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 
-type DialogMode = 'create' | 'rename' | 'lock' | 'unlock'
+type DialogMode = 'create' | 'rename' | 'lock'
 
 type DialogState = {
   mode: DialogMode | null
@@ -102,7 +102,7 @@ export const WorkspaceSwitcher = observer(() => {
       mode,
       error: null,
       loading: false,
-      value: mode === 'rename' ? (currentWorkspaceRecord?.name ?? '') : mode === 'lock' || mode === 'unlock' ? '' : '',
+      value: mode === 'rename' ? (currentWorkspaceRecord?.name ?? '') : mode === 'lock' ? '' : '',
     })
   }
 
@@ -149,36 +149,32 @@ export const WorkspaceSwitcher = observer(() => {
       return
     }
 
-    if (!currentWorkspaceRecord) {
-      setDialogState(prev => ({ ...prev, error: 'No workspace selected.' }))
-      return
-    }
+    if (dialogState.mode === 'lock') {
+      if (!currentWorkspaceRecord) {
+        setDialogState(prev => ({ ...prev, error: 'No workspace selected.' }))
+        return
+      }
 
-    if (!dialogState.value) {
-      setDialogState(prev => ({ ...prev, error: 'Enter a password to continue.' }))
-      return
-    }
+      if (!dialogState.value) {
+        setDialogState(prev => ({ ...prev, error: 'Enter a password to continue.' }))
+        return
+      }
 
-    setDialogState(prev => ({ ...prev, loading: true, error: null }))
+      setDialogState(prev => ({ ...prev, loading: true, error: null }))
 
-    try {
-      if (dialogState.mode === 'lock') {
+      try {
         await store.lockWorkspace(currentWorkspaceRecord.id, dialogState.value)
-      } else {
-        await store.unlockWorkspace(currentWorkspaceRecord.id, dialogState.value)
+        closeDialog()
+      } catch (error) {
+        const code = (error as { code?: string } | undefined)?.code
+        let message = 'Unable to process request. Please try again.'
+        if (code === 'WORKSPACE_PASSWORD_REQUIRED') {
+          message = 'Enter a password to continue.'
+        } else if (code === 'EVENT_STORE_UNAVAILABLE') {
+          message = 'Workspace encryption requires access to local storage.'
+        }
+        setDialogState(prev => ({ ...prev, loading: false, error: message }))
       }
-      closeDialog()
-    } catch (error) {
-      const code = (error as { code?: string } | undefined)?.code
-      let message = 'Unable to process request. Please try again.'
-      if (code === 'WORKSPACE_PASSWORD_REQUIRED') {
-        message = 'Enter a password to continue.'
-      } else if (code === 'WORKSPACE_UNLOCK_FAILED') {
-        message = 'The password was incorrect. Try again.'
-      } else if (code === 'EVENT_STORE_UNAVAILABLE') {
-        message = 'Workspace encryption requires access to local storage.'
-      }
-      setDialogState(prev => ({ ...prev, loading: false, error: message }))
     }
   }
 
@@ -228,14 +224,6 @@ export const WorkspaceSwitcher = observer(() => {
             disabled={!currentWorkspaceRecord || currentWorkspaceRecord.locked}>
             <Lock className="size-4" />
             Lock current workspace
-          </CommandItem>
-          <CommandItem
-            value="unlock-workspace"
-            onSelect={() => handleOpenDialog('unlock')}
-            className="gap-2"
-            disabled={!currentWorkspaceRecord || !currentWorkspaceRecord.locked}>
-            <Unlock className="size-4" />
-            Unlock current workspace
           </CommandItem>
         </CommandGroup>
       </CommandList>
@@ -297,18 +285,14 @@ export const WorkspaceSwitcher = observer(() => {
                   ? 'Create workspace'
                   : dialogState.mode === 'rename'
                     ? 'Rename workspace'
-                    : dialogState.mode === 'lock'
-                      ? 'Lock workspace'
-                      : 'Unlock workspace'}
+                    : 'Lock workspace'}
               </DialogTitle>
               <DialogDescription>
                 {dialogState.mode === 'create'
                   ? 'Workspaces keep bullets grouped together. Give it a descriptive name.'
                   : dialogState.mode === 'rename'
                     ? 'Update the workspace name. All bullets will stay linked to the new name.'
-                    : dialogState.mode === 'lock'
-                      ? 'Protect this workspace with a password. You will need it to unlock and view the bullets.'
-                      : 'Enter the password to unlock this workspace and decrypt its bullets.'}
+                    : 'Protect this workspace with a password. You will need it to unlock and view the bullets.'}
               </DialogDescription>
             </DialogHeader>
             <Input
@@ -327,7 +311,7 @@ export const WorkspaceSwitcher = observer(() => {
                   ? 'workspace-name-input'
                   : 'workspace-password-input'
               }
-              type={dialogState.mode === 'lock' || dialogState.mode === 'unlock' ? 'password' : 'text'}
+              type={dialogState.mode === 'lock' ? 'password' : 'text'}
             />
             {dialogState.error && <p className="text-sm text-destructive">{dialogState.error}</p>}
             <DialogFooter className="pt-2">
@@ -338,16 +322,14 @@ export const WorkspaceSwitcher = observer(() => {
                 {dialogState.loading ? (
                   <>
                     <Loader2 className="mr-2 size-4 animate-spin" />
-                    {dialogState.mode === 'lock' || dialogState.mode === 'unlock' ? 'Checking' : 'Saving'}
+                    {dialogState.mode === 'lock' ? 'Checking' : 'Saving'}
                   </>
                 ) : dialogState.mode === 'create' ? (
                   'Create'
                 ) : dialogState.mode === 'rename' ? (
                   'Rename'
-                ) : dialogState.mode === 'lock' ? (
-                  'Lock workspace'
                 ) : (
-                  'Unlock workspace'
+                  'Lock workspace'
                 )}
               </Button>
             </DialogFooter>

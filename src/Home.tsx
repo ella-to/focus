@@ -1,7 +1,9 @@
 import { Breadcrumbs } from '@/components/breadcrumbs'
 import { BulletList } from '@/components/bullet-list'
 import { DataControls } from '@/components/data-controls'
+import { LockedWorkspaceView } from '@/components/locked-workspace-view'
 import { SearchBar } from '@/components/search-bar'
+import { UnlockWorkspaceDialog } from '@/components/unlock-workspace-dialog'
 import { Button } from '@/components/ui/button'
 import { WorkspaceSwitcher } from '@/components/workspace-switcher'
 import { StoreProvider, useStore } from '@/lib/store-context'
@@ -22,6 +24,7 @@ const HomeContent = observer(() => {
   const { workspaceId, bulletId } = useParams<{ workspaceId?: string; bulletId?: string }>()
   const navigate = useNavigate()
   const [showShortcuts, setShowShortcuts] = useState(true)
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false)
   const lastSyncedIdRef = useRef<string | null>(null)
 
   const routeWorkspaceId = workspaceId ?? null
@@ -132,6 +135,7 @@ const HomeContent = observer(() => {
   const isStoreReady = store.isBootstrapped && store.currentWorkspace === routeWorkspaceId && store.historyIndex >= 0
   const bulletExists = isStoreReady && routeBulletId ? store.findBulletById(routeBulletId) : null
   const showNotFound = isStoreReady && routeBulletId !== null && !bulletExists
+  const isCurrentWorkspaceLocked = store.isBootstrapped && store.isCurrentWorkspaceLocked
 
   const handleReturnHome = () => {
     store.zoomToBullet(null)
@@ -160,7 +164,12 @@ const HomeContent = observer(() => {
 
       {/* Main Content */}
       <main className="px-6 py-8 flex-1">
-        {showNotFound ? (
+        {isCurrentWorkspaceLocked ? (
+          <LockedWorkspaceView
+            workspaceName={store.currentWorkspaceRecord?.name || 'Workspace'}
+            onUnlockClick={() => setShowUnlockDialog(true)}
+          />
+        ) : showNotFound ? (
           <div className="flex flex-col items-center justify-center text-center gap-4 py-24">
             <div>
               <h2 className="text-lg font-semibold text-foreground mb-2">Bullet not found</h2>
@@ -199,6 +208,17 @@ const HomeContent = observer(() => {
           </span>
         </div>
       </footer>
+
+      <UnlockWorkspaceDialog
+        open={showUnlockDialog}
+        workspaceName={store.currentWorkspaceRecord?.name || 'Workspace'}
+        onOpenChange={setShowUnlockDialog}
+        onUnlock={async (password: string) => {
+          if (store.currentWorkspace) {
+            await store.unlockWorkspace(store.currentWorkspace, password)
+          }
+        }}
+      />
 
       {/* Keyboard Shortcuts Help */}
       {showShortcuts && (
