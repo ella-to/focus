@@ -35,6 +35,13 @@ export function UnlockWorkspaceDialog({
       setPassword('')
       setError(null)
       setLoading(false)
+      
+      // Delay focus by 200ms to allow mobile to adjust screen properly
+      const timer = setTimeout(() => {
+        inputRef.current?.focus()
+      }, 200)
+      
+      return () => clearTimeout(timer)
     }
   }, [open])
 
@@ -98,7 +105,6 @@ export function UnlockWorkspaceDialog({
             spellCheck={false}
             disabled={loading}
             data-testid="unlock-password-input"
-            autoFocus
           />
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter className="pt-2">

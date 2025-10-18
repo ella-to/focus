@@ -86,7 +86,7 @@ export const WorkspaceSwitcher = observer(() => {
       if (dialogState.mode === 'create') {
         inputRef.current?.select()
       }
-    }, 50)
+    }, 200)
 
     return () => window.clearTimeout(timeout)
   }, [dialogState.mode, isDialogOpen])
