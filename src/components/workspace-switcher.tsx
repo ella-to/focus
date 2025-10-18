@@ -292,7 +292,15 @@ export const WorkspaceSwitcher = observer(() => {
         <DialogContent className="sm:max-w-[420px]">
           <form onSubmit={handleDialogSubmit} className="space-y-4">
             <DialogHeader>
-              <DialogTitle>{dialogState.mode === 'create' ? 'Create workspace' : 'Rename workspace'}</DialogTitle>
+              <DialogTitle>
+                {dialogState.mode === 'create'
+                  ? 'Create workspace'
+                  : dialogState.mode === 'rename'
+                    ? 'Rename workspace'
+                    : dialogState.mode === 'lock'
+                      ? 'Lock workspace'
+                      : 'Unlock workspace'}
+              </DialogTitle>
               <DialogDescription>
                 {dialogState.mode === 'create'
                   ? 'Workspaces keep bullets grouped together. Give it a descriptive name.'
