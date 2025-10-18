@@ -9,7 +9,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Loader2 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 
 interface UnlockWorkspaceDialogProps {
   open: boolean
@@ -28,6 +28,15 @@ export function UnlockWorkspaceDialog({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Reset dialog state when it opens
+  useEffect(() => {
+    if (open) {
+      setPassword('')
+      setError(null)
+      setLoading(false)
+    }
+  }, [open])
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -59,6 +68,7 @@ export function UnlockWorkspaceDialog({
 
   const handleOpenChange = (newOpen: boolean) => {
     if (!newOpen) {
+      // Optional: clear state when closing (effect will also do this when opening next time)
       setPassword('')
       setError(null)
       setLoading(false)
