@@ -147,4 +147,31 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Fix header position on mobile with virtual keyboard */
+  @supports (position: fixed) {
+    @media (max-height: 500px) and (orientation: landscape) {
+      header {
+        position: fixed;
+      }
+    }
+  }
+
+  /* Hide scrollbars on mobile/smaller devices while keeping scroll functional */
+  @media (max-width: 640px) {
+    /* For webkit browsers (Chrome, Safari) */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+    
+    /* For Firefox */
+    * {
+      scrollbar-width: none;
+    }
+    
+    /* For IE and Edge */
+    body {
+      -ms-overflow-style: none;
+    }
+  }
 }

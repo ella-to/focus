@@ -144,7 +144,7 @@ const HomeContent = observer(() => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-20">
+      <header className="border-b border-border bg-card/50 backdrop-blur-sm fixed top-0 left-0 right-0 z-20 w-full">
         <div className="flex w-full items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6">
           <div className="flex items-center gap-3 min-w-0 text-foreground">
             <h1 className="text-xl font-semibold shrink-0">Focus</h1>
@@ -163,7 +163,7 @@ const HomeContent = observer(() => {
       {!showNotFound && <Breadcrumbs />}
 
       {/* Main Content */}
-      <main className="px-6 py-8 flex-1">
+      <main className="px-6 py-8 flex-1 pt-20">
         {isCurrentWorkspaceLocked ? (
           <LockedWorkspaceView
             workspaceName={store.currentWorkspaceRecord?.name || 'Workspace'}
