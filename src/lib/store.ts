@@ -142,6 +142,16 @@ function createWelcomeTree(): PersistedBullet[] {
   return [welcome]
 }
 
+function createBlankWorkspaceTree(): PersistedBullet[] {
+  return [
+    createPersistedBullet({
+      content: '',
+      context: '',
+      children: [],
+    }),
+  ]
+}
+
 function createCreationEvents(
   nodes: PersistedBullet[],
   parentId: ParentId,
@@ -951,7 +961,32 @@ export const RootStore = types
           try {
             const events = (yield getAllEvents(resolvedWorkspaceId)) as EventRecord[]
             if (events.length > 0) {
-              persistedBullets = replayEvents(events)
+              const latestTimestamp = events.reduce((max, event) => Math.max(max, event.timestamp), 0)
+              if (latestTimestamp > lastTimestamp) {
+                lastTimestamp = latestTimestamp
+              }
+
+              const workspaceEvents = events.filter(event => event.type.startsWith('workspace_'))
+              const bulletEvents = events.filter(event => !event.type.startsWith('workspace_'))
+
+              if (bulletEvents.length > 0) {
+                persistedBullets = replayEvents(bulletEvents)
+              } else if (workspaceEvents.length > 0) {
+                persistedBullets = createBlankWorkspaceTree()
+                const creationEvents = createCreationEvents(persistedBullets, null)
+                const normalizedWorkspaceEvents = workspaceEvents.map(event => ({
+                  type: event.type,
+                  payload: event.payload,
+                  timestamp: event.timestamp,
+                }))
+                yield replaceWorkspaceEvents(resolvedWorkspaceId, [
+                  ...normalizedWorkspaceEvents,
+                  ...creationEvents,
+                ])
+              } else {
+                persistedBullets = createWelcomeTree()
+                yield replaceEventStoreWithTree(resolvedWorkspaceId, persistedBullets)
+              }
             } else {
               persistedBullets = createWelcomeTree()
               yield replaceEventStoreWithTree(resolvedWorkspaceId, persistedBullets)

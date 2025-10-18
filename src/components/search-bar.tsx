@@ -42,7 +42,7 @@ export const SearchBar = observer(() => {
       <Input
         ref={inputRef}
         type="text"
-        placeholder="Search bullets... (Cmd+F)"
+        placeholder="Search..."
         data-search-input="true"
         value={store.searchQuery}
         onChange={e => store.setSearchQuery(e.target.value)}
