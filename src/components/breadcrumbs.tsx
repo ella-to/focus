@@ -26,7 +26,7 @@ export const Breadcrumbs = observer(() => {
   }
 
   return (
-    <div className="flex items-center gap-2 px-6 py-3 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+    <div className="flex items-center gap-2 px-6 py-3 border-b border-border bg-card/50 backdrop-blur-sm sticky top-16 z-10">
       <button
         onClick={() => handleBreadcrumbClick(null)}
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
