@@ -17,6 +17,7 @@ export type EventType =
   | 'bullet_content_updated'
   | 'bullet_context_updated'
   | 'bullet_collapsed_updated'
+  | 'bullet_checked_updated'
   | 'workspace_created'
   | 'workspace_renamed'
   | 'workspace_deleted'
@@ -67,6 +68,10 @@ export interface EventPayloadMap {
   bullet_collapsed_updated: {
     id: string
     collapsed: boolean
+  }
+  bullet_checked_updated: {
+    id: string
+    checked: boolean
   }
   workspace_created: {
     id: string

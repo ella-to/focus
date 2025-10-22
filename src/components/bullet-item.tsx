@@ -8,7 +8,7 @@ import {
 import type { IBullet } from '@/lib/store'
 import { useStore } from '@/lib/store-context'
 import { cn } from '@/lib/utils'
-import { ChevronRight, Circle, Copy, Indent, MoveDown, MoveUp, Outdent, Trash2 } from 'lucide-react'
+import { CheckCircle2, ChevronRight, Circle, Copy, Indent, MoveDown, MoveUp, Outdent, Trash2 } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { isAlive } from 'mobx-state-tree'
 import { useNavigate } from 'react-router-dom'
@@ -35,6 +35,9 @@ export const BulletItem = observer(
     const [touchStartX, setTouchStartX] = useState<number | null>(null)
     const [touchStartY, setTouchStartY] = useState<number | null>(null)
     const [swipeOffset, setSwipeOffset] = useState(0)
+    const tapCountRef = useRef(0)
+    const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const longPressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const showContext = (isAlive(bullet) && !!bullet.context) || isContextFocused
 
     const hasChildren = isAlive(bullet) ? bullet.children.length > 0 : false
@@ -137,22 +140,85 @@ export const BulletItem = observer(
       }
     }
 
-    const handleBulletClick = (e: React.MouseEvent) => {
-      if (!isAlive(bullet)) return
-
-      e.stopPropagation()
-      store.zoomToBullet(bullet.id)
-      const workspaceId = store.currentWorkspace
-      if (workspaceId) {
-        navigate(`/${workspaceId}/${bullet.id}`)
-      }
-    }
-
     const handleToggleCollapse = (e: React.MouseEvent) => {
       if (!isAlive(bullet)) return
 
       e.stopPropagation()
       store.toggleBulletCollapsed(bullet.id)
+    }
+
+    const handleCheckboxClick = (e: React.MouseEvent) => {
+      if (!isAlive(bullet)) return
+
+      e.stopPropagation()
+
+      tapCountRef.current += 1
+
+      if (tapCountRef.current === 1) {
+        // First tap - set a timeout to check if there's a second tap
+        if (tapTimeoutRef.current) {
+          clearTimeout(tapTimeoutRef.current)
+        }
+
+        tapTimeoutRef.current = setTimeout(() => {
+          // Only one tap within the timeout window
+          if (tapCountRef.current === 1) {
+            store.toggleBulletChecked(bullet.id)
+          }
+          tapCountRef.current = 0
+        }, 300)
+      } else if (tapCountRef.current === 2) {
+        // Double tap - zoom to bullet
+        if (tapTimeoutRef.current) {
+          clearTimeout(tapTimeoutRef.current)
+        }
+        tapCountRef.current = 0
+        store.zoomToBullet(bullet.id)
+        const workspaceId = store.currentWorkspace
+        if (workspaceId) {
+          navigate(`/${workspaceId}/${bullet.id}`)
+        }
+      }
+    }
+
+    const handleCheckboxMouseDown = (e: React.MouseEvent) => {
+      if (!isAlive(bullet)) return
+
+      e.stopPropagation()
+
+      // Start long press timeout for context menu
+      longPressTimeoutRef.current = setTimeout(() => {
+        // Trigger context menu - we'll show it via a ref to the ContextMenuTrigger
+      }, 500)
+    }
+
+    const handleCheckboxMouseUp = () => {
+      if (!isAlive(bullet)) return
+
+      if (longPressTimeoutRef.current) {
+        clearTimeout(longPressTimeoutRef.current)
+        longPressTimeoutRef.current = null
+      }
+    }
+
+    const handleCheckboxTouchStart = (e: React.TouchEvent) => {
+      if (!isAlive(bullet)) return
+
+      e.stopPropagation()
+
+      // Start long press timeout for context menu on mobile
+      longPressTimeoutRef.current = setTimeout(() => {
+        // Will trigger context menu
+      }, 500)
+    }
+
+    const handleCheckboxTouchEnd = () => {
+      if (!isAlive(bullet)) return
+
+      if (longPressTimeoutRef.current) {
+        clearTimeout(longPressTimeoutRef.current)
+        longPressTimeoutRef.current = null
+      }
     }
 
     const handleContentFocus = () => {
@@ -352,10 +418,18 @@ export const BulletItem = observer(
             <ContextMenu>
               <ContextMenuTrigger asChild>
                 <button
-                  onClick={handleBulletClick}
-                  className="w-5 h-5 flex items-center justify-center hover:bg-accent rounded transition-colors group/bullet touch-manipulation"
-                  aria-label="Zoom to bullet or right-click for options">
-                  <Circle className="w-2 h-2 fill-[var(--color-bullet)] text-[var(--color-bullet)] group-hover/bullet:fill-[var(--color-bullet-hover)] group-hover/bullet:text-[var(--color-bullet-hover)] transition-colors" />
+                  onClick={handleCheckboxClick}
+                  onMouseDown={handleCheckboxMouseDown}
+                  onMouseUp={handleCheckboxMouseUp}
+                  onTouchStart={handleCheckboxTouchStart}
+                  onTouchEnd={handleCheckboxTouchEnd}
+                  className="w-5 h-5 min-w-5 min-h-5 flex items-center justify-center hover:bg-accent rounded transition-colors touch-manipulation"
+                  aria-label={bullet.checked ? 'Checked - tap to uncheck, double tap to zoom, or right-click for options' : 'Unchecked - tap to check, double tap to zoom, or right-click for options'}>
+                  {bullet.checked ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-600 fill-green-100 dark:fill-green-900" />
+                  ) : (
+                    <Circle className="w-4 h-4 fill-[var(--color-bullet)] text-[var(--color-bullet)]" />
+                  )}
                 </button>
               </ContextMenuTrigger>
               <ContextMenuContent className="w-56">
@@ -397,7 +471,10 @@ export const BulletItem = observer(
               suppressContentEditableWarning
               onInput={handleContentChange}
               onFocus={handleContentFocus}
-              className="bullet-content text-foreground leading-relaxed focus:outline-none"
+              className={cn(
+                'bullet-content text-foreground leading-relaxed focus:outline-none transition-all',
+                bullet.checked && 'line-through opacity-50',
+              )}
               data-placeholder="Type something..."
             />
 

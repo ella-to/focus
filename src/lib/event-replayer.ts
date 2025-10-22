@@ -5,6 +5,7 @@ export interface PersistedBullet {
   content: string
   context: string
   collapsed: boolean
+  checked: boolean
   createdAt: number
   children: PersistedBullet[]
 }
@@ -74,6 +75,7 @@ function ensureNode(state: ReplayState, payload: EventPayloadMap['bullet_created
     content: payload.content,
     context: payload.context,
     collapsed: payload.collapsed,
+    checked: false,
     createdAt: payload.createdAt,
     children: [],
   }
@@ -134,6 +136,13 @@ function applyBulletCollapsedUpdated(state: ReplayState, payload: EventPayloadMa
   }
 }
 
+function applyBulletCheckedUpdated(state: ReplayState, payload: EventPayloadMap['bullet_checked_updated']) {
+  const node = state.nodes.get(payload.id)
+  if (node) {
+    node.checked = payload.checked
+  }
+}
+
 function applyWorkspaceCreated(_state: ReplayState, _payload: EventPayloadMap['workspace_created']) {
   /* no-op */
 }
@@ -157,6 +166,7 @@ const handlers: {
   bullet_content_updated: applyBulletContentUpdated,
   bullet_context_updated: applyBulletContextUpdated,
   bullet_collapsed_updated: applyBulletCollapsedUpdated,
+  bullet_checked_updated: applyBulletCheckedUpdated,
   workspace_created: applyWorkspaceCreated,
   workspace_renamed: applyWorkspaceRenamed,
   workspace_deleted: applyWorkspaceDeleted,

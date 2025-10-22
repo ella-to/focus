@@ -85,6 +85,7 @@ function toSnapshot(node: PersistedBullet): any {
     content: node.content,
     context: node.context,
     collapsed: node.collapsed,
+    checked: node.checked,
     createdAt: node.createdAt,
     children: node.children.map(child => toSnapshot(child)),
   }
@@ -96,6 +97,7 @@ function normalizePersistedBullet(bullet: any): PersistedBullet {
     content: bullet.content ?? '',
     context: bullet.context ?? '',
     collapsed: Boolean(bullet.collapsed),
+    checked: Boolean(bullet.checked),
     createdAt: typeof bullet.createdAt === 'number' ? bullet.createdAt : Date.now(),
     children: Array.isArray(bullet.children) ? bullet.children.map(normalizePersistedBullet) : [],
   }
@@ -105,11 +107,13 @@ function createPersistedBullet({
   content,
   context = '',
   collapsed = false,
+  checked = false,
   children = [],
 }: {
   content: string
   context?: string
   collapsed?: boolean
+  checked?: boolean
   children?: PersistedBullet[]
 }): PersistedBullet {
   return {
@@ -117,6 +121,7 @@ function createPersistedBullet({
     content,
     context,
     collapsed,
+    checked,
     createdAt: Date.now(),
     children,
   }
@@ -233,6 +238,7 @@ export const Bullet: any = types
     context: types.optional(types.string, ''),
     children: types.array(types.late(() => Bullet)),
     collapsed: types.optional(types.boolean, false),
+    checked: types.optional(types.boolean, false),
     createdAt: types.optional(types.number, () => Date.now()),
   })
   .actions(self => ({
@@ -247,6 +253,12 @@ export const Bullet: any = types
     },
     setCollapsed(collapsed: boolean) {
       self.collapsed = collapsed
+    },
+    toggleChecked() {
+      self.checked = !self.checked
+    },
+    setChecked(checked: boolean) {
+      self.checked = checked
     },
     addChild(bullet: Instance<typeof Bullet>) {
       self.children.push(bullet)
@@ -1046,6 +1058,24 @@ export const RootStore = types
 
         bullet.toggleCollapsed()
         emitEvent('bullet_collapsed_updated', { id: bulletId, collapsed: bullet.collapsed })
+      },
+      setBulletChecked(bulletId: string, checked: boolean) {
+        const bullet = self.findBulletById(bulletId)
+        if (!bullet) {
+          return
+        }
+
+        bullet.setChecked(checked)
+        emitEvent('bullet_checked_updated', { id: bulletId, checked })
+      },
+      toggleBulletChecked(bulletId: string) {
+        const bullet = self.findBulletById(bulletId)
+        if (!bullet) {
+          return
+        }
+
+        bullet.toggleChecked()
+        emitEvent('bullet_checked_updated', { id: bulletId, checked: bullet.checked })
       },
       indentBullet(bulletId: string) {
         const context = self.findBulletWithContext(bulletId)
