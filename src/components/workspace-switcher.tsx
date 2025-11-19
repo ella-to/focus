@@ -22,10 +22,12 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useStore } from '@/lib/store-context'
 import { cn } from '@/lib/utils'
-import { Check, ChevronsUpDown, Layers, Loader2, Lock, Pencil, Plus } from 'lucide-react'
+import { Check, ChevronsUpDown, Layers, Loader2, Lock, Pencil, Plus, Trash2 } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
+import { DeleteWorkspaceDialog } from './delete-workspace-dialog'
+import { UnlockWorkspaceDialog } from './unlock-workspace-dialog'
 
 type DialogMode = 'create' | 'rename' | 'lock'
 
@@ -49,6 +51,8 @@ export const WorkspaceSwitcher = observer(() => {
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [dialogState, setDialogState] = useState<DialogState>(INITIAL_DIALOG_STATE)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [unlockDialogOpen, setUnlockDialogOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === 'undefined') {
@@ -104,6 +108,32 @@ export const WorkspaceSwitcher = observer(() => {
       loading: false,
       value: mode === 'rename' ? (currentWorkspaceRecord?.name ?? '') : mode === 'lock' ? '' : '',
     })
+  }
+
+  const handleOpenDeleteDialog = () => {
+    setPopoverOpen(false)
+    setMobileMenuOpen(false)
+
+    // Check if the workspace is locked
+    if (currentWorkspaceRecord?.locked) {
+      // Open unlock dialog first
+      setUnlockDialogOpen(true)
+    } else {
+      setDeleteDialogOpen(true)
+    }
+  }
+
+  const handleDeleteWorkspace = async () => {
+    await store.deleteCurrentWorkspace()
+  }
+
+  const handleUnlockForDelete = async (password: string) => {
+    if (!currentWorkspaceRecord) return
+
+    await store.unlockWorkspace(currentWorkspaceRecord.id, password)
+    // After unlocking, open the delete dialog
+    setUnlockDialogOpen(false)
+    setDeleteDialogOpen(true)
   }
 
   const handleSelectWorkspace = (workspaceId: string) => {
@@ -225,6 +255,14 @@ export const WorkspaceSwitcher = observer(() => {
             <Lock className="size-4" />
             Lock current workspace
           </CommandItem>
+          <CommandItem
+            value="delete-workspace"
+            onSelect={handleOpenDeleteDialog}
+            className="gap-2 text-destructive focus:text-destructive"
+            disabled={!currentWorkspaceRecord}>
+            <Trash2 className="size-4" />
+            Delete current workspace
+          </CommandItem>
         </CommandGroup>
       </CommandList>
     </Command>
@@ -336,6 +374,20 @@ export const WorkspaceSwitcher = observer(() => {
           </form>
         </DialogContent>
       </Dialog>
+
+      <DeleteWorkspaceDialog
+        open={deleteDialogOpen}
+        workspaceName={currentWorkspaceRecord?.name ?? ''}
+        onOpenChange={setDeleteDialogOpen}
+        onDelete={handleDeleteWorkspace}
+      />
+
+      <UnlockWorkspaceDialog
+        open={unlockDialogOpen}
+        workspaceName={currentWorkspaceRecord?.name ?? ''}
+        onOpenChange={setUnlockDialogOpen}
+        onUnlock={handleUnlockForDelete}
+      />
     </>
   )
 })
